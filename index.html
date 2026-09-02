@@ -31,17 +31,12 @@
 
 <!--
   ============================================================
-  CONFIGURATION FIREBASE — À REMPLIR (voir guide fourni)
-  1. Va sur https://console.firebase.google.com
-  2. Crée un projet gratuit, active "Firestore Database"
-  3. Ajoute une "application Web" pour obtenir ces valeurs
-  4. Remplace les "REMPLACE_MOI" ci-dessous par tes propres valeurs
+  CONFIGURATION FIREBASE — déjà remplie pour ce projet
   ============================================================
 -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-  import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script>
   const firebaseConfig = {
     apiKey: "AIzaSyDpeFavzMZf7YARNYUWonCzQVXV0RVYfvk",
     authDomain: "budget-862425.firebaseapp.com",
@@ -53,22 +48,26 @@
 
   const DOC_ID = "nous2-budget"; // identifiant fixe du foyer, partagé par les deux téléphones
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const ref = doc(db, "households", DOC_ID);
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const ref = db.collection("households").doc(DOC_ID);
 
   window.fb = {
     async getShared() {
-      const snap = await getDoc(ref);
-      return snap.exists() ? snap.data() : null;
+      const snap = await ref.get();
+      return snap.exists ? snap.data() : null;
     },
     async setShared(value) {
-      await setDoc(ref, value);
+      await ref.set(value);
     },
     subscribeShared(callback) {
-      return onSnapshot(ref, (snap) => callback(snap.exists() ? snap.data() : null), () => callback(null));
+      return ref.onSnapshot(
+        (snap) => callback(snap.exists ? snap.data() : null),
+        () => callback(null)
+      );
     },
   };
+
   // Shim compatible with the app's existing storage calls: shared -> Firestore, personal -> localStorage
   window.storage = {
     async get(key, shared) {
