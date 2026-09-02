@@ -204,7 +204,8 @@ function App() {
   const dataRef = useRef(null);
   const audioCtxRef = useRef(null);
   const musicRef = useRef(null);
-  const [musicOn, setMusicOn] = useState(false);
+  const wantMusicRef = useRef(true);
+  const [musicOn, setMusicOn] = useState(true);
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const T = isDark ? DARK : LIGHT;
@@ -283,9 +284,32 @@ function App() {
     await storageSet(THEME_KEY, next ? 'dark' : 'light', false);
   };
 
+  useEffect(() => {
+    if (!musicRef.current) {
+      musicRef.current = new Audio('bg-music.mp3');
+      musicRef.current.loop = true;
+      musicRef.current.volume = 0.35;
+    }
+    const tryPlay = () => musicRef.current.play().catch(() => {});
+    tryPlay();
+    const retryOnFirstTouch = () => {
+      if (wantMusicRef.current) tryPlay();
+      window.removeEventListener('pointerdown', retryOnFirstTouch);
+      window.removeEventListener('keydown', retryOnFirstTouch);
+    };
+    window.addEventListener('pointerdown', retryOnFirstTouch, { once: true });
+    window.addEventListener('keydown', retryOnFirstTouch, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', retryOnFirstTouch);
+      window.removeEventListener('keydown', retryOnFirstTouch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const toggleMusic = () => {
     const next = !musicOn;
     setMusicOn(next);
+    wantMusicRef.current = next;
     try {
       if (!musicRef.current) {
         musicRef.current = new Audio('bg-music.mp3');
