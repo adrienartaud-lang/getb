@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Nous² Budget</title>
+<meta name="description" content="Budget partagé à deux" />
+<meta name="theme-color" content="#5FA083" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Nous²" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+
+<!-- React + Babel (no build step needed) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Tailwind CDN (utility classes at runtime) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #F7F5F1; }
+  #root { max-width: 480px; margin: 0 auto; min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!--
+  ============================================================
+  CONFIGURATION FIREBASE — À REMPLIR (voir guide fourni)
+  1. Va sur https://console.firebase.google.com
+  2. Crée un projet gratuit, active "Firestore Database"
+  3. Ajoute une "application Web" pour obtenir ces valeurs
+  4. Remplace les "REMPLACE_MOI" ci-dessous par tes propres valeurs
+  ============================================================
+-->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDpeFavzMZf7YARNYUWonCzQVXV0RVYfvk",
+    authDomain: "budget-862425.firebaseapp.com",
+    projectId: "budget-862425",
+    storageBucket: "budget-862425.firebasestorage.app",
+    messagingSenderId: "1031003963715",
+    appId: "1:1031003963715:web:d9d2072fab191b9cea2ff6"
+  };
+
+  const DOC_ID = "nous2-budget"; // identifiant fixe du foyer, partagé par les deux téléphones
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const ref = doc(db, "households", DOC_ID);
+
+  window.fb = {
+    async getShared() {
+      const snap = await getDoc(ref);
+      return snap.exists() ? snap.data() : null;
+    },
+    async setShared(value) {
+      await setDoc(ref, value);
+    },
+    subscribeShared(callback) {
+      return onSnapshot(ref, (snap) => callback(snap.exists() ? snap.data() : null), () => callback(null));
+    },
+  };
+  // Shim compatible with the app's existing storage calls: shared -> Firestore, personal -> localStorage
+  window.storage = {
+    async get(key, shared) {
+      if (shared) {
+        const val = await window.fb.getShared();
+        return val ? { key, value: JSON.stringify(val), shared } : null;
+      }
+      const v = localStorage.getItem(key);
+      return v != null ? { key, value: v, shared } : null;
+    },
+    async set(key, value, shared) {
+      if (shared) {
+        await window.fb.setShared(JSON.parse(value));
+      } else {
+        localStorage.setItem(key, value);
+      }
+      return { key, value, shared };
+    },
+    async delete(key, shared) {
+      if (!shared) localStorage.removeItem(key);
+      return { key, deleted: true, shared };
+    },
+    async list(prefix, shared) {
+      if (shared) return { keys: [] };
+      return { keys: Object.keys(localStorage).filter((k) => !prefix || k.startsWith(prefix)) };
+    },
+  };
+
+  window.dispatchEvent(new Event("fb-ready"));
+</script>
+
+<!-- App (JSX transpiled in-browser by Babel standalone) -->
+<script type="text/babel" data-presets="react" src="app.js"></script>
+
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
