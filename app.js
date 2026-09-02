@@ -256,9 +256,19 @@ function App() {
     setShowAdd(true);
   };
 
-  const chooseProfile = async (name) => {
+const chooseProfile = async (name) => {
     setMyProfile(name);
     await storageSet(PROFILE_KEY, name, false);
+  };
+
+  const logout = async () => {
+    setMyProfile(null);
+    try { await window.storage.delete(PROFILE_KEY, false); } catch (e) {}
+  };
+
+  const logout = async () => {
+    setMyProfile(null);
+    try { await window.storage.delete(PROFILE_KEY, false); } catch (e) {}
   };
 
   const toggleTheme = async () => {
@@ -491,7 +501,7 @@ function App() {
           <SettingsView
             T={T} data={data} myProfile={myProfile} isDark={isDark} toggleTheme={toggleTheme}
             exportCSV={exportCSV} deleteRecurring={deleteRecurring} toggleRecurringActive={toggleRecurringActive}
-            addCategory={addCategory} deleteCategory={deleteCategory} switchProfile={() => setMyProfile(null)}
+            addCategory={addCategory} deleteCategory={deleteCategory} switchProfile={logout}
           />
         )}
       </div>
@@ -1279,7 +1289,7 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
 
       <Section T={T} title="Profil">
         <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 8 }}>Connecté en tant que <b style={{ color: T.text }}>{myProfile}</b></div>
-        <RowButton T={T} icon={User} label="Changer de profil sur cet appareil" onClick={switchProfile} />
+        <RowButton T={T} icon={User} label="Se déconnecter" onClick={switchProfile} />
       </Section>
 
       <Section T={T} title="Catégories de dépenses">
