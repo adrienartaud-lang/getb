@@ -110,8 +110,15 @@
   fetch('app.js?v=2')
     .then((r) => r.text())
     .then((code) => {
-      const transformed = Babel.transform(code, { presets: ['react'] }).code;
+      const transformed = Babel.transform(code, { presets: [['react', { runtime: 'classic' }]] }).code;
       const s = document.createElement('script');
       s.textContent = transformed;
       document.body.appendChild(s);
     })
+    .catch((err) => {
+      document.getElementById('root').innerHTML =
+        '<div style="padding:40px;text-align:center;font-family:sans-serif;color:#a33;">Erreur de chargement de l\'application : ' + err + '</div>';
+    });
+</script>
+</body>
+</html>
