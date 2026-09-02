@@ -7,7 +7,7 @@ const EMOJI = {
   Repeat: '🔁', Settings2: '⚙️', Users: '👥', User: '🙂', ShoppingCart: '🛒', Home: '🏠', Car: '🚗',
   Utensils: '🍽️', Gamepad2: '🎮', Heart: '❤️', Zap: '⚡', Gift: '🎁', MoreHorizontal: '•••',
   TrendingUp: '↗️', TrendingDown: '↘️', RefreshCw: '⟳', Trash2: '🗑️', Pencil: '✏️', PiggyBank: '🐷',
-  ChevronRight: '›', ChevronLeft: '‹', Banknote: '💵', ArrowRight: '→', Scale: '⚖️', Check: '✓', ListFilter: '📜',
+  ChevronRight: '›', ChevronLeft: '‹', Banknote: '💵', ArrowRight: '→', Scale: '⚖️', Check: '✓', ListFilter: '📜', Music: '🎵',
 };
 function makeIconComponent(name) {
   return function IconComp({ size = 16, color }) {
@@ -26,7 +26,7 @@ const Wallet = makeIconComponent('Wallet'), Plus = makeIconComponent('Plus'), X 
   PiggyBank = makeIconComponent('PiggyBank'), ChevronRight = makeIconComponent('ChevronRight'),
   ChevronLeft = makeIconComponent('ChevronLeft'), Banknote = makeIconComponent('Banknote'),
   ArrowRight = makeIconComponent('ArrowRight'), Scale = makeIconComponent('Scale'), Check = makeIconComponent('Check'),
-  ListFilter = makeIconComponent('ListFilter');
+  ListFilter = makeIconComponent('ListFilter'), Music = makeIconComponent('Music');
 
 /* ---------------------------------- firebase-backed storage shim ---------------------------------- */
 
@@ -62,6 +62,14 @@ const DARK = {
 
 const ICONS = EMOJI;
 
+const PRESET_EXPENSE_CATEGORIES = [
+  { name: 'Animaux', icon: '🐾' }, { name: 'Enfants', icon: '👶' }, { name: 'Éducation', icon: '📚' },
+  { name: 'Voyages', icon: '✈️' }, { name: 'Pharmacie', icon: '💊' }, { name: 'Sport', icon: '🏋️' },
+  { name: 'Café', icon: '☕' }, { name: 'Sorties', icon: '🍺' }, { name: 'Auto / Entretien', icon: '🚗' },
+  { name: 'Abonnements', icon: '📱' }, { name: 'Ménage', icon: '🧹' }, { name: 'Beauté', icon: '💅' },
+];
+const PRESET_COLOR_CYCLE = ['primary', 'secondary', 'accent', 'accent2'];
+
 const DEFAULT_EXPENSE_CATEGORIES = [
   { id: 'courses', name: 'Courses', icon: 'ShoppingCart', colorKey: 'primary' },
   { id: 'logement', name: 'Logement', icon: 'Home', colorKey: 'secondary' },
@@ -75,6 +83,7 @@ const DEFAULT_EXPENSE_CATEGORIES = [
 ];
 const INCOME_CATEGORIES = [
   { id: 'salaire', name: 'Salaire', icon: 'Banknote', colorKey: 'primary' },
+  { id: 'caf', name: 'CAF / Allocations', icon: 'Banknote', colorKey: 'accent2' },
   { id: 'remboursement', name: 'Remboursement', icon: 'Repeat', colorKey: 'accent' },
   { id: 'cadeau-recu', name: 'Cadeau reçu', icon: 'Gift', colorKey: 'accent2' },
   { id: 'autre-revenu', name: 'Autre revenu', icon: 'MoreHorizontal', colorKey: 'textMuted' },
@@ -142,6 +151,34 @@ function playSad(ctx) {
   });
 }
 
+function createAmbientPad(ctx) {
+  const master = ctx.createGain();
+  master.gain.value = 0;
+  master.connect(ctx.destination);
+  const freqs = [130.81, 164.81, 196.0, 261.63]; // Cm-ish soft chord
+  const oscs = freqs.map((f) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.value = 0.05;
+    o.connect(g); g.connect(master);
+    o.start();
+    return o;
+  });
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 0.07;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.15;
+  lfo.connect(lfoGain);
+  lfoGain.connect(master.gain);
+  lfo.start();
+  return {
+    master,
+    stopAll() { try { oscs.forEach((o) => o.stop()); lfo.stop(); } catch (e) {} },
+  };
+}
+
 function makeDefaultData(name1, name2) {
   return {
     profiles: [name1, name2],
@@ -194,6 +231,8 @@ function App() {
 
   const dataRef = useRef(null);
   const audioCtxRef = useRef(null);
+  const musicRef = useRef(null);
+  const [musicOn, setMusicOn] = useState(false);
   useEffect(() => { dataRef.current = data; }, [data]);
 
   const T = isDark ? DARK : LIGHT;
@@ -256,12 +295,11 @@ function App() {
     setShowAdd(true);
   };
 
-const chooseProfile = async (name) => {
+  const chooseProfile = async (name) => {
     setMyProfile(name);
     await storageSet(PROFILE_KEY, name, false);
   };
 
-  
   const logout = async () => {
     setMyProfile(null);
     try { await window.storage.delete(PROFILE_KEY, false); } catch (e) {}
@@ -271,6 +309,19 @@ const chooseProfile = async (name) => {
     const next = !isDark;
     setIsDark(next);
     await storageSet(THEME_KEY, next ? 'dark' : 'light', false);
+  };
+
+  const toggleMusic = () => {
+    const next = !musicOn;
+    setMusicOn(next);
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      if (!musicRef.current) musicRef.current = createAmbientPad(ctx);
+      musicRef.current.master.gain.cancelScheduledValues(ctx.currentTime);
+      musicRef.current.master.gain.setTargetAtTime(next ? 1 : 0, ctx.currentTime, 1.2);
+    } catch (e) {}
   };
 
   const createHousehold = async (name1, name2) => {
@@ -300,7 +351,7 @@ const chooseProfile = async (name) => {
         newTx.push({
           id: genId(), type: r.type, amount: r.amount, categoryId: r.categoryId,
           date: `${mk}-${String(day).padStart(2, '0')}`, payer: r.payer, scope: r.scope,
-          note: r.label, recurringId: r.id, recurringMonth: mk, createdAt: Date.now(),
+          note: r.label, recurringId: r.id, recurringMonth: mk, nature: r.nature || 'mensuelle', createdAt: Date.now(),
         });
       }
     });
@@ -335,7 +386,12 @@ const chooseProfile = async (name) => {
     const communeExpenses = monthTx.filter((t) => t.type === 'expense' && t.scope === 'commune');
     const total = communeExpenses.reduce((s, t) => s + t.amount, 0);
     if (total === 0) return null;
-    const paidByMe = communeExpenses.filter((t) => t.payer === myProfile).reduce((s, t) => s + t.amount, 0);
+    const jointPayer = data.profiles.join(' & ');
+    const paidByMe = communeExpenses.reduce((s, t) => {
+      if (t.payer === myProfile) return s + t.amount;
+      if (t.payer === jointPayer) return s + t.amount / 2;
+      return s;
+    }, 0);
     const idealShare = total / 2;
     const diff = paidByMe - idealShare;
     if (Math.abs(diff) < 0.5) return null;
@@ -368,7 +424,7 @@ const chooseProfile = async (name) => {
       ...base,
       recurring: [...base.recurring, {
         id: genId(), label: tx.note || 'Récurrence', amount: tx.amount, type: tx.type,
-        categoryId: tx.categoryId, payer: tx.payer, scope: tx.scope, dayOfMonth, active: true,
+        categoryId: tx.categoryId, payer: tx.payer, scope: tx.scope, nature: 'mensuelle', dayOfMonth, active: true,
       }],
     }));
   };
@@ -498,6 +554,7 @@ const chooseProfile = async (name) => {
             T={T} data={data} myProfile={myProfile} isDark={isDark} toggleTheme={toggleTheme}
             exportCSV={exportCSV} deleteRecurring={deleteRecurring} toggleRecurringActive={toggleRecurringActive}
             addCategory={addCategory} deleteCategory={deleteCategory} switchProfile={logout}
+            musicOn={musicOn} toggleMusic={toggleMusic}
           />
         )}
       </div>
@@ -615,7 +672,7 @@ function TopBar({ T, myProfile, isDark, toggleTheme, syncing, saveError, lastSyn
   return (
     <div className="flex items-center justify-between" style={{ padding: '18px 16px 8px' }}>
       <div>
-        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Ad&Lie Budget</div>
+        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Nous²</div>
         <div style={{ fontSize: 12, color: T.textMuted, display: 'flex', alignItems: 'center', gap: 5 }}>
           <RefreshCw size={11} style={{ animation: syncing ? 'fadeIn 0.6s infinite alternate' : 'none' }} />
           {saveError ? 'Hors ligne' : secs < 6 ? 'À jour' : `Sync. il y a ${secs}s`}
@@ -644,7 +701,7 @@ function BottomNav({ T, tab, setTab, onAdd }) {
   return (
     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto' }}>
       <button onClick={onAdd} className="rounded-full flex items-center justify-center" style={{
-        position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: -22,
+        position: 'absolute', left: '40%', transform: 'translateX(-50%)', top: -22,
         width: 50, height: 50, background: T.primary, border: `4px solid ${T.bg}`, boxShadow: T.shadow, zIndex: 2,
       }}>
         <Plus size={22} color="#fff" />
@@ -668,7 +725,7 @@ function BottomNav({ T, tab, setTab, onAdd }) {
 /* ---------------------------------- dashboard ---------------------------------- */
 
 function CategoryIcon({ name, size = 18, color }) {
-  return <span style={{ fontSize: size, color, lineHeight: 1, display: 'inline-block' }}>{ICONS[name] || '•••'}</span>;
+  return <span style={{ fontSize: size, color, lineHeight: 1, display: 'inline-block' }}>{ICONS[name] || name || '•••'}</span>;
 }
 
 function TrendBars({ T, data }) {
@@ -953,6 +1010,7 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
         <select value={filterPayer} onChange={(e) => setFilterPayer(e.target.value)} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: '7px 10px', fontSize: 12, color: T.text }}>
           <option value="all">Tous les payeurs</option>
           {data.profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+          <option value={data.profiles.join(' & ')}>{data.profiles.join(' & ')}</option>
         </select>
       </div>
       {grouped.length === 0 && <div style={{ color: T.textMuted, fontSize: 13, textAlign: 'center', padding: '30px 0' }}>Aucune transaction pour ce mois.</div>}
@@ -1079,29 +1137,44 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
   const todayDay = today.getDate();
 
-  const budget = data.monthlyTargets?.[mk] || 0;
-  const dailyTarget = budget > 0 ? budget / daysInMonth : null;
-
-  const netByDay = useMemo(() => {
-    const m = {};
+  // Épargne prévisionnelle du mois = somme des transactions "mensuelles" (anticipées) de ce mois.
+  const { monthlyNet, hasMensuelle, ponctuelNetByDay, allNetByDay } = useMemo(() => {
+    let net = 0, count = 0;
+    const ponctuel = {}, all = {};
     data.transactions.forEach((t) => {
-      if (monthKey(t.date) === mk) {
-        const d = parseInt(t.date.slice(8, 10), 10);
-        m[d] = (m[d] || 0) + (t.type === 'income' ? t.amount : -t.amount);
+      if (monthKey(t.date) !== mk) return;
+      const d = parseInt(t.date.slice(8, 10), 10);
+      const signed = t.type === 'income' ? t.amount : -t.amount;
+      all[d] = (all[d] || 0) + signed;
+      if (t.nature === 'mensuelle') {
+        net += signed;
+        count += 1;
+      } else {
+        ponctuel[d] = (ponctuel[d] || 0) + signed;
       }
     });
-    return m;
+    return { monthlyNet: net, hasMensuelle: count > 0, ponctuelNetByDay: ponctuel, allNetByDay: all };
   }, [data.transactions, mk]);
+
+  const manualBudget = data.monthlyTargets?.[mk] || 0;
+  const hasTarget = hasMensuelle || manualBudget > 0;
+  const effectiveBudget = hasMensuelle ? monthlyNet : manualBudget;
+  const effectiveDailyTarget = hasTarget ? effectiveBudget / daysInMonth : null;
 
   const lastKnownDay = isCurrentMonth ? todayDay : daysInMonth;
   const cumulSoFar = useMemo(() => {
+    if (effectiveDailyTarget !== null) {
+      let ponctSum = 0;
+      for (let d = 1; d <= lastKnownDay; d++) ponctSum += ponctuelNetByDay[d] || 0;
+      return lastKnownDay * effectiveDailyTarget + ponctSum;
+    }
     let s = 0;
-    for (let d = 1; d <= lastKnownDay; d++) s += netByDay[d] || 0;
+    for (let d = 1; d <= lastKnownDay; d++) s += allNetByDay[d] || 0;
     return s;
-  }, [netByDay, lastKnownDay]);
+  }, [effectiveDailyTarget, ponctuelNetByDay, allNetByDay, lastKnownDay]);
 
   const remainingDays = isCurrentMonth ? Math.max(0, daysInMonth - todayDay) : 0;
-  const remainingTarget = budget > 0 ? budget - cumulSoFar : null;
+  const remainingTarget = hasTarget ? effectiveBudget - cumulSoFar : null;
   const perDayNeeded = remainingTarget !== null && remainingDays > 0 ? remainingTarget / remainingDays : remainingTarget;
 
   const weeks = [];
@@ -1109,7 +1182,7 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
   while (cells.length % 7 !== 0) cells.push(null);
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
-  const openBudgetEdit = () => { setBudgetInput(budget > 0 ? String(budget) : ''); setEditingBudget(true); };
+  const openBudgetEdit = () => { setBudgetInput(manualBudget > 0 ? String(manualBudget) : ''); setEditingBudget(true); };
 
   return (
     <div className="flex flex-col gap-3">
@@ -1120,8 +1193,10 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
       </div>
 
       <div style={{ background: T.accentSoft, borderRadius: 16, padding: '12px 14px' }}>
-        <div style={{ fontSize: 11.5, color: T.accent, fontWeight: 600, marginBottom: 6 }}>Budget / objectif d'épargne pour {MONTH_LABELS_FULL[month]}</div>
-        {editingBudget ? (
+        <div style={{ fontSize: 11.5, color: T.accent, fontWeight: 600, marginBottom: 6 }}>Épargne prévisionnelle — {MONTH_LABELS_FULL[month]}</div>
+        {hasMensuelle ? (
+          <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: T.accent }}>{fmtMoney(monthlyNet)}</div>
+        ) : editingBudget ? (
           <div className="flex gap-2">
             <input autoFocus type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder="Montant en €"
               style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 13, background: T.surface, color: T.text }} />
@@ -1130,12 +1205,17 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
           </div>
         ) : (
           <button onClick={openBudgetEdit} className="flex items-center gap-2" style={{ background: 'none', border: 'none', color: T.accent, fontSize: 15, fontWeight: 700 }}>
-            {budget > 0 ? fmtMoney(budget) : 'Définir un montant'} <Pencil size={13} />
+            {manualBudget > 0 ? fmtMoney(manualBudget) : 'Définir un montant manuellement'} <Pencil size={13} />
           </button>
         )}
-        {dailyTarget !== null && (
-          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Soit un objectif de {fmtMoney(dailyTarget)} / jour sur {daysInMonth} jours.</div>
+        {effectiveDailyTarget !== null && (
+          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Soit un objectif de {fmtMoney(effectiveDailyTarget)} / jour sur {daysInMonth} jours.</div>
         )}
+        <div style={{ fontSize: 10, color: T.textMuted, marginTop: 6 }}>
+          {hasMensuelle
+            ? 'Calculé automatiquement à partir de vos transactions "Mensuelles" (salaires, loyer, factures…).'
+            : 'Ajoutez des transactions "Mensuelles" pour un calcul automatique, ou définissez un montant manuellement.'}
+        </div>
       </div>
 
       <div>
@@ -1148,14 +1228,20 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
           <div key={wi} className="flex" style={{ gap: 3, marginBottom: 3 }}>
             {week.map((d, di) => {
               if (d === null) return <div key={di} style={{ flex: 1 }} />;
-              const net = netByDay[d];
-              const hasData = net !== undefined;
+              const ponctuelNet = ponctuelNetByDay[d] || 0;
+              let value, hasData;
+              if (effectiveDailyTarget !== null) {
+                value = effectiveDailyTarget + ponctuelNet;
+                hasData = true;
+              } else {
+                value = allNetByDay[d];
+                hasData = value !== undefined;
+              }
               const isFuture = isCurrentMonth && d > todayDay;
               const isToday = isCurrentMonth && d === todayDay;
               let bg = T.surfaceAlt, fg = T.textMuted;
               if (hasData && !isFuture) {
-                const reference = dailyTarget !== null ? dailyTarget : 0;
-                const ok = net >= reference;
+                const ok = effectiveDailyTarget !== null ? ponctuelNet >= 0 : value >= 0;
                 bg = ok ? T.primarySoft : T.secondarySoft;
                 fg = ok ? T.primary : T.secondary;
               }
@@ -1164,8 +1250,8 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
                   style={{ flex: 1, minHeight: 44, borderRadius: 10, border: isToday ? `1.5px solid ${T.accent}` : 'none',
                     background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 0', opacity: isFuture ? 0.5 : 1 }}>
                   <span style={{ fontSize: 10.5, color: isToday ? T.accent : T.textMuted, fontWeight: isToday ? 700 : 500 }}>{d}</span>
-                  {hasData && !isFuture && (
-                    <span className="fnum" style={{ fontSize: 9.5, fontWeight: 700, color: fg }}>{net >= 0 ? '+' : ''}{Math.round(net)}€</span>
+                  {hasData && (
+                    <span className="fnum" style={{ fontSize: 9.5, fontWeight: 700, color: fg }}>{value >= 0 ? '+' : ''}{Math.round(value)}€</span>
                   )}
                 </button>
               );
@@ -1176,19 +1262,19 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
 
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '14px 16px' }}>
         <div className="flex items-center justify-between" style={{ fontSize: 12.5, marginBottom: 6 }}>
-          <span style={{ color: T.textMuted }}>Épargné depuis le début du mois</span>
+          <span style={{ color: T.textMuted }}>Épargne réelle depuis le début du mois</span>
           <span className="fnum" style={{ fontWeight: 700, color: cumulSoFar >= 0 ? T.primary : T.secondary }}>{fmtMoney(cumulSoFar)}</span>
         </div>
-        {budget > 0 && isCurrentMonth && (
+        {hasTarget && isCurrentMonth && (
           <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
             {remainingTarget > 0
               ? <>Il te reste <b style={{ color: T.text }}>{remainingDays}</b> jours pour économiser encore <b style={{ color: T.text }}>{fmtMoney(remainingTarget)}</b>, soit <b style={{ color: T.text }}>{fmtMoney(perDayNeeded)}</b> / jour.</>
               : <>Objectif du mois déjà atteint, bravo ! 🎉</>}
           </div>
         )}
-        {budget > 0 && !isCurrentMonth && (
+        {hasTarget && !isCurrentMonth && (
           <div style={{ fontSize: 12, color: T.textMuted }}>
-            Objectif du mois : {fmtMoney(budget)} — {cumulSoFar >= budget ? 'atteint ✅' : `manqué de ${fmtMoney(budget - cumulSoFar)}`}
+            Objectif du mois : {fmtMoney(effectiveBudget)} — {cumulSoFar >= effectiveBudget ? 'atteint ✅' : `manqué de ${fmtMoney(effectiveBudget - cumulSoFar)}`}
           </div>
         )}
         <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 8 }}>Astuce : touche un jour pour y ajouter une transaction rétroactivement.</div>
@@ -1271,7 +1357,7 @@ function GoalsView({ T, data, addGoal, contributeGoal, deleteGoal }) {
 
 /* ---------------------------------- settings ---------------------------------- */
 
-function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, deleteRecurring, toggleRecurringActive, addCategory, deleteCategory, switchProfile }) {
+function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, deleteRecurring, toggleRecurringActive, addCategory, deleteCategory, switchProfile, musicOn, toggleMusic }) {
   const [showNewCat, setShowNewCat] = useState(false);
   const [catName, setCatName] = useState('');
 
@@ -1281,6 +1367,8 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
 
       <Section T={T} title="Apparence">
         <RowButton T={T} icon={isDark ? Sun : Moon} label={isDark ? 'Mode clair' : 'Mode sombre'} onClick={toggleTheme} />
+        <div style={{ height: 8 }} />
+        <RowButton T={T} icon={Music} label={musicOn ? 'Musique de fond : activée' : 'Musique de fond : désactivée'} onClick={toggleMusic} />
       </Section>
 
       <Section T={T} title="Profil">
@@ -1298,6 +1386,17 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
             </div>
           ))}
         </div>
+
+        <div style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, margin: '12px 0 6px' }}>Ajouter rapidement (émoticônes)</div>
+        <div className="flex flex-wrap gap-2" style={{ marginBottom: 10 }}>
+          {PRESET_EXPENSE_CATEGORIES.filter((p) => !data.expenseCategories.some((c) => c.name === p.name)).map((p, i) => (
+            <button key={p.name} onClick={() => addCategory(p.name, p.icon, PRESET_COLOR_CYCLE[i % PRESET_COLOR_CYCLE.length], 'expense')}
+              className="flex items-center gap-1" style={{ background: T.surfaceAlt, border: 'none', borderRadius: 10, padding: '6px 10px', fontSize: 12, color: T.text }}>
+              <span style={{ fontSize: 15 }}>{p.icon}</span> {p.name}
+            </button>
+          ))}
+        </div>
+
         {showNewCat ? (
           <div className="flex gap-2" style={{ marginTop: 10 }}>
             <input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Nom de la catégorie" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 12, background: T.bg, color: T.text }} />
@@ -1305,7 +1404,7 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
               style={{ background: T.primary, color: '#fff', border: 'none', borderRadius: 10, padding: '0 12px', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
           </div>
         ) : (
-          <RowButton T={T} icon={Plus} label="Ajouter une catégorie" onClick={() => setShowNewCat(true)} small />
+          <RowButton T={T} icon={Plus} label="Ajouter une catégorie personnalisée" onClick={() => setShowNewCat(true)} small />
         )}
       </Section>
 
@@ -1358,8 +1457,8 @@ function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate,
   const [date, setDate] = useState(editingTx?.date || initialDate || todayISO());
   const [payer, setPayer] = useState(editingTx?.payer || myProfile);
   const [scope, setScope] = useState(editingTx?.scope || 'commune');
+  const [nature, setNature] = useState(editingTx?.nature || 'ponctuelle');
   const [note, setNote] = useState(editingTx?.note || '');
-  const [repeat, setRepeat] = useState(false);
 
   const categories = type === 'income' ? data.incomeCategories : data.expenseCategories;
   useEffect(() => { if (!categoryId && categories.length) setCategoryId(categories[0].id); }, [type]); // eslint-disable-line
@@ -1369,12 +1468,12 @@ function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate,
   const handleSave = () => {
     if (!canSave) return;
     const tx = {
-      id: editingTx?.id || genId(), type, amount: parseFloat(amount), categoryId, date, payer, scope,
+      id: editingTx?.id || genId(), type, amount: parseFloat(amount), categoryId, date, payer, scope, nature,
       note: note.trim(), recurringId: editingTx?.recurringId || null, recurringMonth: editingTx?.recurringMonth || null,
       createdAt: editingTx?.createdAt || Date.now(),
     };
     onSave(tx);
-    if (repeat && !editingTx) onSaveRecurring(tx, new Date(date + 'T00:00:00').getDate());
+    if (nature === 'mensuelle' && !editingTx) onSaveRecurring(tx, new Date(date + 'T00:00:00').getDate());
   };
 
   return (
@@ -1423,6 +1522,7 @@ function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate,
             <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, fontWeight: 600 }}>Payeur</div>
             <select value={payer} onChange={(e) => setPayer(e.target.value)} style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 12, padding: '9px 10px', fontSize: 13, background: T.surface, color: T.text }}>
               {data.profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+              <option value={data.profiles.join(' & ')}>{data.profiles.join(' & ')}</option>
             </select>
           </div>
         </div>
@@ -1438,15 +1538,24 @@ function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate,
           ))}
         </div>
 
+        <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8, fontWeight: 600 }}>Nature</div>
+        <div className="flex gap-2" style={{ marginBottom: 4 }}>
+          {[{ id: 'mensuelle', label: 'Mensuelle (anticipée)' }, { id: 'ponctuelle', label: 'Ponctuelle (quotidien)' }].map((s) => (
+            <button key={s.id} onClick={() => setNature(s.id)}
+              style={{ flex: 1, padding: '9px 4px', borderRadius: 12, border: 'none', fontSize: 12, fontWeight: 600,
+                background: nature === s.id ? T.primarySoft : T.surfaceAlt, color: nature === s.id ? T.primary : T.textMuted }}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 10.5, color: T.textMuted, marginBottom: 14 }}>
+          {nature === 'mensuelle'
+            ? 'Salaire, CAF, loyer, EDF… se répète automatiquement chaque mois et sert de base à votre épargne prévisionnelle.'
+            : 'Dépense ou rentrée ponctuelle du quotidien, comptée jour par jour dans le calendrier.'}
+        </div>
+
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optionnel)"
           style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 12, padding: '10px 14px', fontSize: 13, background: T.surface, color: T.text, marginBottom: 14 }} />
-
-        {!editingTx && (
-          <label className="flex items-center gap-2" style={{ fontSize: 12.5, color: T.textMuted, marginBottom: 16 }}>
-            <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
-            Répéter chaque mois
-          </label>
-        )}
 
         <button disabled={!canSave} onClick={handleSave}
           style={{ width: '100%', background: canSave ? T.primary : T.border, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 0', fontSize: 14, fontWeight: 600, marginBottom: editingTx ? 8 : 0 }}>
