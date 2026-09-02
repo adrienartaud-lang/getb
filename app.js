@@ -615,7 +615,7 @@ function TopBar({ T, myProfile, isDark, toggleTheme, syncing, saveError, lastSyn
   return (
     <div className="flex items-center justify-between" style={{ padding: '18px 16px 8px' }}>
       <div>
-        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Nous²</div>
+        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Ad&Lie Budget</div>
         <div style={{ fontSize: 12, color: T.textMuted, display: 'flex', alignItems: 'center', gap: 5 }}>
           <RefreshCw size={11} style={{ animation: syncing ? 'fadeIn 0.6s infinite alternate' : 'none' }} />
           {saveError ? 'Hors ligne' : secs < 6 ? 'À jour' : `Sync. il y a ${secs}s`}
