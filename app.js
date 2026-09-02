@@ -7,7 +7,7 @@ const EMOJI = {
   Repeat: '🔁', Settings2: '⚙️', Users: '👥', User: '🙂', ShoppingCart: '🛒', Home: '🏠', Car: '🚗',
   Utensils: '🍽️', Gamepad2: '🎮', Heart: '❤️', Zap: '⚡', Gift: '🎁', MoreHorizontal: '•••',
   TrendingUp: '↗️', TrendingDown: '↘️', RefreshCw: '⟳', Trash2: '🗑️', Pencil: '✏️', PiggyBank: '🐷',
-  ChevronRight: '›', ChevronLeft: '‹', Banknote: '💵', ArrowRight: '→', Scale: '⚖️', Check: '✓', ListFilter: '📜', Music: '🎵',
+  ChevronRight: '›', ChevronLeft: '‹', Banknote: '💵', ArrowRight: '→', Scale: '⚖️', Check: '✓', ListFilter: '📜', Music: '🎵', Euro: '💶',
 };
 function makeIconComponent(name) {
   return function IconComp({ size = 16, color }) {
@@ -26,7 +26,7 @@ const Wallet = makeIconComponent('Wallet'), Plus = makeIconComponent('Plus'), X 
   PiggyBank = makeIconComponent('PiggyBank'), ChevronRight = makeIconComponent('ChevronRight'),
   ChevronLeft = makeIconComponent('ChevronLeft'), Banknote = makeIconComponent('Banknote'),
   ArrowRight = makeIconComponent('ArrowRight'), Scale = makeIconComponent('Scale'), Check = makeIconComponent('Check'),
-  ListFilter = makeIconComponent('ListFilter'), Music = makeIconComponent('Music');
+  ListFilter = makeIconComponent('ListFilter'), Music = makeIconComponent('Music'), Euro = makeIconComponent('Euro');
 
 /* ---------------------------------- firebase-backed storage shim ---------------------------------- */
 
@@ -149,34 +149,6 @@ function playSad(ctx) {
     osc.connect(gain); gain.connect(ctx.destination);
     osc.start(t); osc.stop(t + 0.42);
   });
-}
-
-function createAmbientPad(ctx) {
-  const master = ctx.createGain();
-  master.gain.value = 0;
-  master.connect(ctx.destination);
-  const freqs = [130.81, 164.81, 196.0, 261.63]; // Cm-ish soft chord
-  const oscs = freqs.map((f) => {
-    const o = ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.value = f;
-    const g = ctx.createGain();
-    g.gain.value = 0.05;
-    o.connect(g); g.connect(master);
-    o.start();
-    return o;
-  });
-  const lfo = ctx.createOscillator();
-  lfo.frequency.value = 0.07;
-  const lfoGain = ctx.createGain();
-  lfoGain.gain.value = 0.15;
-  lfo.connect(lfoGain);
-  lfoGain.connect(master.gain);
-  lfo.start();
-  return {
-    master,
-    stopAll() { try { oscs.forEach((o) => o.stop()); lfo.stop(); } catch (e) {} },
-  };
 }
 
 function makeDefaultData(name1, name2) {
@@ -315,12 +287,16 @@ function App() {
     const next = !musicOn;
     setMusicOn(next);
     try {
-      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
-      if (!musicRef.current) musicRef.current = createAmbientPad(ctx);
-      musicRef.current.master.gain.cancelScheduledValues(ctx.currentTime);
-      musicRef.current.master.gain.setTargetAtTime(next ? 1 : 0, ctx.currentTime, 1.2);
+      if (!musicRef.current) {
+        musicRef.current = new Audio('bg-music.mp3');
+        musicRef.current.loop = true;
+        musicRef.current.volume = 0.35;
+      }
+      if (next) {
+        musicRef.current.play().catch(() => {});
+      } else {
+        musicRef.current.pause();
+      }
     } catch (e) {}
   };
 
@@ -672,7 +648,7 @@ function TopBar({ T, myProfile, isDark, toggleTheme, syncing, saveError, lastSyn
   return (
     <div className="flex items-center justify-between" style={{ padding: '18px 16px 8px' }}>
       <div>
-        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Nous²</div>
+        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Ad&Lie Budget</div>
         <div style={{ fontSize: 12, color: T.textMuted, display: 'flex', alignItems: 'center', gap: 5 }}>
           <RefreshCw size={11} style={{ animation: syncing ? 'fadeIn 0.6s infinite alternate' : 'none' }} />
           {saveError ? 'Hors ligne' : secs < 6 ? 'À jour' : `Sync. il y a ${secs}s`}
@@ -694,14 +670,14 @@ function BottomNav({ T, tab, setTab, onAdd }) {
   const items = [
     { id: 'accueil', label: 'Accueil', icon: Wallet },
     { id: 'historique', label: 'Historique', icon: ListFilter },
-    { id: 'budgets', label: 'Budgets', icon: PiggyBank },
+    { id: 'budgets', label: 'Budgets', icon: Euro },
     { id: 'objectifs', label: 'Objectifs', icon: Target },
     { id: 'reglages', label: 'Réglages', icon: Settings2 },
   ];
   return (
     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, maxWidth: 480, margin: '0 auto' }}>
       <button onClick={onAdd} className="rounded-full flex items-center justify-center" style={{
-        position: 'absolute', left: '40%', transform: 'translateX(-50%)', top: -22,
+        position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: 64,
         width: 50, height: 50, background: T.primary, border: `4px solid ${T.bg}`, boxShadow: T.shadow, zIndex: 2,
       }}>
         <Plus size={22} color="#fff" />
@@ -1427,7 +1403,7 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
         <RowButton T={T} icon={Download} label="Exporter en CSV" onClick={exportCSV} />
       </Section>
 
-      <div style={{ textAlign: 'center', color: T.textMuted, fontSize: 11, marginTop: 8 }}>Nous² · votre budget partagé</div>
+      <div style={{ textAlign: 'center', color: T.textMuted, fontSize: 11, marginTop: 8 }}>Ad&Lie Budget · votre budget partagé</div>
     </div>
   );
 }
