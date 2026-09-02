@@ -261,11 +261,7 @@ const chooseProfile = async (name) => {
     await storageSet(PROFILE_KEY, name, false);
   };
 
-  const logout = async () => {
-    setMyProfile(null);
-    try { await window.storage.delete(PROFILE_KEY, false); } catch (e) {}
-  };
-
+  
   const logout = async () => {
     setMyProfile(null);
     try { await window.storage.delete(PROFILE_KEY, false); } catch (e) {}
