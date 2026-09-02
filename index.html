@@ -27,6 +27,12 @@
 </style>
 </head>
 <body>
+<script>
+  // Unregister any leftover service worker from earlier testing, just in case.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
+  }
+</script>
 <div id="root"></div>
 
 <!--
@@ -99,15 +105,13 @@
   window.dispatchEvent(new Event("fb-ready"));
 </script>
 
-<!-- App (JSX transpiled in-browser by Babel standalone) -->
-<script type="text/babel" data-presets="react" src="app.js"></script>
-
+<!-- App (JSX transpiled in-browser by Babel standalone, loaded manually to avoid any conflict with the page's other scripts) -->
 <script>
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("service-worker.js").catch(() => {});
-    });
-  }
-</script>
-</body>
-</html>
+  fetch('app.js?v=2')
+    .then((r) => r.text())
+    .then((code) => {
+      const transformed = Babel.transform(code, { presets: ['react'] }).code;
+      const s = document.createElement('script');
+      s.textContent = transformed;
+      document.body.appendChild(s);
+    })
