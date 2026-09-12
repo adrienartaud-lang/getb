@@ -1078,7 +1078,7 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
 /* ---------------------------------- budgets ---------------------------------- */
 
 function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, onAddForDate }) {
-  const [view, setView] = useState('categories');
+  const [view, setView] = useState('calendar');
   const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
 
@@ -1106,7 +1106,7 @@ function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, on
       <div className="fnum" style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>Budgets</div>
 
       <div className="flex gap-2">
-        {[{ id: 'categories', label: 'Par catégorie' }, { id: 'calendar', label: 'Calendrier' }].map((v) => (
+        {[{ id: 'calendar', label: 'Calendrier' }, { id: 'categories', label: 'Par catégorie' }].map((v) => (
           <button key={v.id} onClick={() => setView(v.id)}
             style={{ flex: 1, padding: '9px 0', borderRadius: 12, border: 'none', fontSize: 12.5, fontWeight: 600,
               background: view === v.id ? T.primarySoft : T.surfaceAlt, color: view === v.id ? T.primary : T.textMuted }}>
