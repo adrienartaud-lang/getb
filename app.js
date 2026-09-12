@@ -419,11 +419,11 @@ function App() {
     setEditingTx(null);
     if (isNew) triggerCelebration(tx.type, tx.amount);
   };
-  const saveRecurringFromTx = (tx, dayOfMonth) => {
+  const saveRecurringFromTx = (tx, dayOfMonth, recurringId) => {
     persist((base) => ({
       ...base,
       recurring: [...base.recurring, {
-        id: genId(), label: tx.note || 'Récurrence', amount: tx.amount, type: tx.type,
+        id: recurringId || genId(), label: tx.note || 'Récurrence', amount: tx.amount, type: tx.type,
         categoryId: tx.categoryId, payer: tx.payer, scope: tx.scope, nature: 'mensuelle', dayOfMonth, active: true,
       }],
     }));
@@ -1467,13 +1467,17 @@ function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate,
 
   const handleSave = () => {
     if (!canSave) return;
+    const isNewMensuelle = nature === 'mensuelle' && !editingTx;
+    const newRecurringId = isNewMensuelle ? genId() : null;
     const tx = {
       id: editingTx?.id || genId(), type, amount: parseFloat(amount), categoryId, date, payer, scope, nature,
-      note: note.trim(), recurringId: editingTx?.recurringId || null, recurringMonth: editingTx?.recurringMonth || null,
+      note: note.trim(),
+      recurringId: isNewMensuelle ? newRecurringId : (editingTx?.recurringId || null),
+      recurringMonth: isNewMensuelle ? monthKey(date) : (editingTx?.recurringMonth || null),
       createdAt: editingTx?.createdAt || Date.now(),
     };
     onSave(tx);
-    if (nature === 'mensuelle' && !editingTx) onSaveRecurring(tx, new Date(date + 'T00:00:00').getDate());
+    if (isNewMensuelle) onSaveRecurring(tx, new Date(date + 'T00:00:00').getDate(), newRecurringId);
   };
 
   return (
