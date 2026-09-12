@@ -1191,6 +1191,7 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); return d; });
   const [budgetInput, setBudgetInput] = useState('');
   const [editingBudget, setEditingBudget] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
 
   const year = viewDate.getFullYear(), month = viewDate.getMonth();
   const mk = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -1201,9 +1202,9 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
   const todayDay = today.getDate();
 
   // Épargne prévisionnelle du mois = somme des transactions "mensuelles" (anticipées) de ce mois.
-  const { monthlyNet, hasMensuelle, ponctuelNetByDay, allNetByDay } = useMemo(() => {
-    let net = 0, count = 0;
-    const ponctuel = {}, all = {};
+  const { monthlyNet, hasMensuelle, mensuelleList, ponctuelNetByDay, allNetByDay } = useMemo(() => {
+    let net = 0;
+    const ponctuel = {}, all = {}, list = [];
     data.transactions.forEach((t) => {
       if (monthKey(t.date) !== mk) return;
       const d = parseInt(t.date.slice(8, 10), 10);
@@ -1211,12 +1212,13 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
       all[d] = (all[d] || 0) + signed;
       if (t.nature === 'mensuelle') {
         net += signed;
-        count += 1;
+        list.push(t);
       } else {
         ponctuel[d] = (ponctuel[d] || 0) + signed;
       }
     });
-    return { monthlyNet: net, hasMensuelle: count > 0, ponctuelNetByDay: ponctuel, allNetByDay: all };
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    return { monthlyNet: net, hasMensuelle: list.length > 0, mensuelleList: list, ponctuelNetByDay: ponctuel, allNetByDay: all };
   }, [data.transactions, mk]);
 
   const manualBudget = data.monthlyTargets?.[mk] || 0;
@@ -1226,15 +1228,10 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
 
   const lastKnownDay = isCurrentMonth ? todayDay : daysInMonth;
   const cumulSoFar = useMemo(() => {
-    if (effectiveDailyTarget !== null) {
-      let ponctSum = 0;
-      for (let d = 1; d <= lastKnownDay; d++) ponctSum += ponctuelNetByDay[d] || 0;
-      return lastKnownDay * effectiveDailyTarget + ponctSum;
-    }
     let s = 0;
     for (let d = 1; d <= lastKnownDay; d++) s += allNetByDay[d] || 0;
     return s;
-  }, [effectiveDailyTarget, ponctuelNetByDay, allNetByDay, lastKnownDay]);
+  }, [allNetByDay, lastKnownDay]);
 
   const remainingDays = isCurrentMonth ? Math.max(0, daysInMonth - todayDay) : 0;
   const remainingTarget = hasTarget ? effectiveBudget - cumulSoFar : null;
@@ -1279,6 +1276,24 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
             ? 'Calculé automatiquement à partir de vos transactions "Mensuelles" (salaires, loyer, factures…).'
             : 'Ajoutez des transactions "Mensuelles" pour un calcul automatique, ou définissez un montant manuellement.'}
         </div>
+        {hasMensuelle && (
+          <button onClick={() => setShowDetail((s) => !s)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11, fontWeight: 600, marginTop: 8, textDecoration: 'underline' }}>
+            {showDetail ? 'Masquer le détail' : `Voir le détail (${mensuelleList.length})`}
+          </button>
+        )}
+        {hasMensuelle && showDetail && (
+          <div className="flex flex-col gap-1.5" style={{ marginTop: 10, borderTop: `1px solid rgba(0,0,0,0.08)`, paddingTop: 10 }}>
+            {mensuelleList.map((t) => (
+              <div key={t.id} className="flex items-center gap-2" style={{ fontSize: 11.5 }}>
+                <span style={{ color: T.textMuted, width: 30, flexShrink: 0 }}>{fmtDateShort(t.date)}</span>
+                <span style={{ flex: 1, color: T.text }}>{t.note || (t.type === 'income' ? 'Revenu' : 'Dépense')}</span>
+                <span className="fnum" style={{ fontWeight: 700, color: t.type === 'income' ? T.primary : T.secondary }}>
+                  {t.type === 'income' ? '+' : '−'}{fmtMoney(t.amount).replace('-', '')}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
@@ -1331,7 +1346,7 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
         {hasTarget && isCurrentMonth && (
           <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
             {remainingTarget > 0
-              ? <>Il te reste <b style={{ color: T.text }}>{remainingDays}</b> jours pour économiser encore <b style={{ color: T.text }}>{fmtMoney(remainingTarget)}</b>, soit <b style={{ color: T.text }}>{fmtMoney(perDayNeeded)}</b> / jour.</>
+              ? <>Objectif du mois : <b style={{ color: T.text }}>{fmtMoney(effectiveBudget)}</b> ({fmtMoney(effectiveDailyTarget)} / jour en rythme régulier). Il te reste <b style={{ color: T.text }}>{remainingDays}</b> jours pour économiser encore <b style={{ color: T.text }}>{fmtMoney(remainingTarget)}</b> — soit un rythme de rattrapage de <b style={{ color: T.text }}>{fmtMoney(perDayNeeded)}</b> / jour à partir de maintenant.</>
               : <>Objectif du mois déjà atteint, bravo ! 🎉</>}
           </div>
         )}
