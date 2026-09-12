@@ -1409,6 +1409,7 @@ function GoalsView({ T, data, addGoal, contributeGoal, deleteGoal }) {
 function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, deleteRecurring, toggleRecurringActive, addCategory, deleteCategory, switchProfile, musicOn, toggleMusic }) {
   const [showNewCat, setShowNewCat] = useState(false);
   const [catName, setCatName] = useState('');
+  const [catEmoji, setCatEmoji] = useState('');
 
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
@@ -1448,8 +1449,10 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
 
         {showNewCat ? (
           <div className="flex gap-2" style={{ marginTop: 10 }}>
+            <input value={catEmoji} onChange={(e) => setCatEmoji(e.target.value)} placeholder="🙂" maxLength={4}
+              style={{ width: 46, textAlign: 'center', border: `1px solid ${T.border}`, borderRadius: 10, padding: '7px 4px', fontSize: 16, background: T.bg, color: T.text }} />
             <input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Nom de la catégorie" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 12, background: T.bg, color: T.text }} />
-            <button onClick={() => { if (catName.trim()) { addCategory(catName.trim(), 'MoreHorizontal', 'accent', 'expense'); setCatName(''); setShowNewCat(false); } }}
+            <button onClick={() => { if (catName.trim()) { addCategory(catName.trim(), catEmoji.trim() || 'MoreHorizontal', 'accent', 'expense'); setCatName(''); setCatEmoji(''); setShowNewCat(false); } }}
               style={{ background: T.primary, color: '#fff', border: 'none', borderRadius: 10, padding: '0 12px', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
           </div>
         ) : (
