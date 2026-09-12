@@ -151,6 +151,45 @@ function playSad(ctx) {
   });
 }
 
+function playVictoryFanfare(ctx) {
+  const now = ctx.currentTime;
+  // Original ascending arpeggio + bright final chord — a little "quest complete" feel, no borrowed melody.
+  const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    const t = now + i * 0.09;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.14, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.24);
+  });
+  // final sparkly chord
+  const chordT = now + notes.length * 0.09 + 0.03;
+  [1046.5, 1318.5, 1568.0].forEach((freq) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, chordT);
+    gain.gain.exponentialRampToValueAtTime(0.13, chordT + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, chordT + 0.5);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(chordT); osc.stop(chordT + 0.52);
+  });
+}
+
+const AVOIDED_MESSAGES = [
+  "Bravo, ton portefeuille te remercie ! 💪",
+  "Belle résistance, ça compte vraiment.",
+  "Un pas de plus vers tes objectifs !",
+  "Fier(e) de toi, continue comme ça.",
+  "C'est ça, la vraie force tranquille.",
+];
+
 function makeDefaultData(name1, name2) {
   return {
     profiles: [name1, name2],
@@ -159,6 +198,7 @@ function makeDefaultData(name1, name2) {
     transactions: [],
     recurring: [],
     goals: [],
+    avoidedPurchases: [],
     monthlyTargets: {},
     updatedAt: Date.now(),
     lastEditedBy: name1,
@@ -200,6 +240,7 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [celebration, setCelebration] = useState(null);
   const [addInitialDate, setAddInitialDate] = useState(todayISO());
+  const [showAvoided, setShowAvoided] = useState(false);
 
   const dataRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -249,17 +290,31 @@ function App() {
     setLastSync(Date.now());
   }, [myProfile]);
 
-  const triggerCelebration = (type, amount) => {
+  const triggerCelebration = (type, amount, name) => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const ctx = audioCtxRef.current;
       if (ctx.state === 'suspended') ctx.resume();
-      if (type === 'income') playCashRegister(ctx); else playSad(ctx);
+      if (type === 'income') playCashRegister(ctx);
+      else if (type === 'saved') playVictoryFanfare(ctx);
+      else playSad(ctx);
     } catch (e) {}
     const key = Date.now();
-    setCelebration({ type, amount, key });
-    setTimeout(() => setCelebration((c) => (c && c.key === key ? null : c)), 1500);
+    setCelebration({ type, amount, name, key });
+    setTimeout(() => setCelebration((c) => (c && c.key === key ? null : c)), type === 'saved' ? 2200 : 1500);
   };
+
+  const addAvoidedPurchase = (name, price, payer) => {
+    persist((base) => ({
+      ...base,
+      avoidedPurchases: [...(base.avoidedPurchases || []), { id: genId(), name, price, payer, date: todayISO(), createdAt: Date.now() }],
+    }));
+    setShowAvoided(false);
+    triggerCelebration('saved', price, name);
+  };
+  const deleteAvoidedPurchase = (id) => persist((base) => ({
+    ...base, avoidedPurchases: (base.avoidedPurchases || []).filter((a) => a.id !== id),
+  }));
 
   const openAdd = (preset, initialDate) => {
     setAddPreset(preset || 'expense');
@@ -534,6 +589,8 @@ function App() {
             openAdd={(preset) => openAdd(preset)}
             onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }}
             goToHistory={() => setTab('historique')}
+            openAvoided={() => setShowAvoided(true)}
+            deleteAvoidedPurchase={deleteAvoidedPurchase}
           />
         )}
         {tab === 'historique' && (
@@ -570,6 +627,14 @@ function App() {
         />
       )}
 
+      {showAvoided && (
+        <AvoidedSheet
+          T={T} data={data} myProfile={myProfile}
+          onClose={() => setShowAvoided(false)}
+          onSave={addAvoidedPurchase}
+        />
+      )}
+
       {celebration && <Celebration T={T} celebration={celebration} />}
     </div>
   );
@@ -579,6 +644,34 @@ function App() {
 
 function Celebration({ T, celebration }) {
   const isIncome = celebration.type === 'income';
+  const isSaved = celebration.type === 'saved';
+
+  if (isSaved) {
+    const msg = AVOIDED_MESSAGES[Math.floor(Math.random() * AVOIDED_MESSAGES.length)];
+    const particles = ['✨', '🎉', '🏆', '✨', '🎉', '⭐'];
+    return (
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 60 }}>
+        <div style={{ position: 'relative', animation: 'popIn 0.5s cubic-bezier(.34,1.56,.64,1), fadeOutDelay 2.2s ease-in forwards', textAlign: 'center', padding: '0 24px' }}>
+          <div style={{ fontSize: 60, filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.15))' }}>🏆</div>
+          <div className="fnum" style={{ fontSize: 22, fontWeight: 700, color: T.accent, marginTop: 4 }}>
+            + {fmtMoney(celebration.amount)} épargnés !
+          </div>
+          {celebration.name && (
+            <div style={{ fontSize: 12.5, color: T.textMuted, marginTop: 2 }}>en résistant à « {celebration.name} »</div>
+          )}
+          <div style={{ fontSize: 13, color: T.text, marginTop: 8, fontWeight: 500 }}>{msg}</div>
+          {particles.map((p, i) => (
+            <div key={i} style={{
+              position: 'absolute', top: -10, left: `${5 + i * 15}%`, fontSize: 20,
+              animation: `fallCoin ${1 + i * 0.1}s ease-in ${i * 0.07}s forwards`,
+              opacity: 0,
+            }}>{p}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const particles = isIncome ? ['🪙', '💰', '🪙', '✨', '🪙'] : ['💧', '💧', '💧'];
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 60 }}>
@@ -749,27 +842,6 @@ function TrendBars({ T, data }) {
   );
 }
 
-function SimpleDailyBars({ T, data, todayDay }) {
-  const maxAbs = Math.max(1, ...data.map((d) => Math.abs(d.net)));
-  return (
-    <div className="flex items-end" style={{ height: 90, gap: 2 }}>
-      {data.map((d) => {
-        const isFuture = d.day > todayDay;
-        const h = Math.max(3, (Math.abs(d.net) / maxAbs) * 80);
-        return (
-          <div key={d.day} title={`Jour ${d.day}: ${fmtMoney(d.net)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-            <div style={{
-              width: '100%', maxWidth: 8, height: h, borderRadius: 3,
-              background: d.net >= 0 ? T.primary : T.secondary, opacity: isFuture ? 0.2 : 1,
-              border: d.day === todayDay ? `1.5px solid ${T.accent}` : 'none',
-            }} />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function DonutChart({ T, data }) {
   const total = data.reduce((s, d) => s + d.value, 0) || 1;
   let acc = 0;
@@ -787,7 +859,7 @@ function DonutChart({ T, data }) {
   );
 }
 
-function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory }) {
+function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory, openAvoided, deleteAvoidedPurchase }) {
   const pieData = useMemo(() => {
     const byCat = {};
     monthTx.filter((t) => t.type === 'expense').forEach((t) => {
@@ -800,6 +872,9 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
   }, [monthTx, categoryOf]);
 
   const recent = useMemo(() => data.transactions.slice().sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 5), [data.transactions]);
+
+  const monthAvoided = useMemo(() => (data.avoidedPurchases || []).filter((a) => monthKey(a.date) === monthKey(todayISO())), [data.avoidedPurchases]);
+  const monthAvoidedTotal = useMemo(() => monthAvoided.reduce((s, a) => s + a.price, 0), [monthAvoided]);
 
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
@@ -825,6 +900,29 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
         </button>
       </div>
 
+      <button onClick={openAvoided} className="flex items-center justify-center gap-2" style={{ background: T.accentSoft, color: T.accent, borderRadius: 16, padding: '13px 0', fontWeight: 600, fontSize: 14, border: 'none' }}>
+        🏆 J'ai résisté à un achat !
+      </button>
+
+      {monthAvoided.length > 0 && (
+        <div style={{ background: T.surface, borderRadius: 18, padding: '14px 16px', border: `1px solid ${T.border}` }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Tentations évitées ce mois</div>
+            <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: T.accent }}>{fmtMoney(monthAvoidedTotal)}</div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {monthAvoided.slice(0, 4).map((a) => (
+              <div key={a.id} className="flex items-center gap-2" style={{ fontSize: 12 }}>
+                <span>🏆</span>
+                <span style={{ flex: 1, color: T.textMuted }}>{a.name}</span>
+                <span className="fnum" style={{ fontWeight: 600 }}>{fmtMoney(a.price)}</span>
+                <button onClick={() => deleteAvoidedPurchase(a.id)} style={{ background: 'none', border: 'none', color: T.textMuted }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {balanceOwed && (
         <div className="flex items-center gap-3" style={{ background: T.accentSoft, borderRadius: 16, padding: '14px 16px' }}>
           <Scale size={20} color={T.accent} />
@@ -834,8 +932,6 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
           </div>
         </div>
       )}
-
-      <SavingsPace T={T} monthTx={monthTx} />
 
       {pieData.length > 0 && (
         <div style={{ background: T.surface, borderRadius: 18, padding: '16px 16px 6px', border: `1px solid ${T.border}` }}>
@@ -867,53 +963,6 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
         <div className="flex flex-col gap-2">
           {recent.length === 0 && <div style={{ color: T.textMuted, fontSize: 13, textAlign: 'center', padding: '20px 0' }}>Aucune transaction pour l'instant.</div>}
           {recent.map((t) => <TxRow key={t.id} T={T} t={t} cat={categoryOf(t.categoryId, t.type)} onClick={() => onSelectTx(t)} />)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SavingsPace({ T, monthTx }) {
-  const today = new Date();
-  const year = today.getFullYear(), month = today.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayDay = today.getDate();
-
-  const dailyData = useMemo(() => {
-    const byDay = {};
-    monthTx.forEach((t) => {
-      const d = parseInt(t.date.slice(8, 10), 10);
-      byDay[d] = (byDay[d] || 0) + (t.type === 'income' ? t.amount : -t.amount);
-    });
-    const arr = [];
-    for (let d = 1; d <= daysInMonth; d++) arr.push({ day: d, net: Math.round((byDay[d] || 0) * 100) / 100 });
-    return arr;
-  }, [monthTx, daysInMonth]);
-
-  const netSoFar = useMemo(() => dailyData.slice(0, todayDay).reduce((s, d) => s + d.net, 0), [dailyData, todayDay]);
-  const avgPerDay = todayDay > 0 ? netSoFar / todayDay : 0;
-  const projection = avgPerDay * daysInMonth;
-  const todayNet = dailyData[todayDay - 1]?.net || 0;
-
-  return (
-    <div style={{ background: T.surface, borderRadius: 18, padding: '16px 14px 8px', border: `1px solid ${T.border}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Rythme d'épargne — {MONTH_LABELS_FULL[month]}</div>
-      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10 }}>Jour {todayDay} sur {daysInMonth}</div>
-
-      <SimpleDailyBars T={T} data={dailyData} todayDay={todayDay} />
-
-      <div className="flex" style={{ gap: 8, marginTop: 8, marginBottom: 8 }}>
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: todayNet >= 0 ? T.primary : T.secondary }}>{fmtMoney(todayNet)}</div>
-          <div style={{ fontSize: 10, color: T.textMuted }}>Aujourd'hui</div>
-        </div>
-        <div style={{ flex: 1, textAlign: 'center', borderLeft: `1px solid ${T.border}`, borderRight: `1px solid ${T.border}` }}>
-          <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: avgPerDay >= 0 ? T.primary : T.secondary }}>{fmtMoney(avgPerDay)}</div>
-          <div style={{ fontSize: 10, color: T.textMuted }}>Moyenne / jour</div>
-        </div>
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: projection >= 0 ? T.primary : T.secondary }}>{fmtMoney(projection)}</div>
-          <div style={{ fontSize: 10, color: T.textMuted }}>Fin de mois (est.)</div>
         </div>
       </div>
     </div>
@@ -1449,6 +1498,47 @@ function RowButton({ T, icon: Icon, label, onClick, small }) {
 }
 
 /* ---------------------------------- add / edit sheet ---------------------------------- */
+
+function AvoidedSheet({ T, data, myProfile, onClose, onSave }) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [payer, setPayer] = useState(myProfile);
+
+  const canSave = name.trim() && parseFloat(price) > 0;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 50, maxWidth: 480, margin: '0 auto' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.bg, width: '100%', borderRadius: '24px 24px 0 0', padding: '18px 18px 26px', animation: 'slideUp 0.25s ease-out' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+          <div className="fnum" style={{ fontSize: 17, fontWeight: 700 }}>🏆 J'ai résisté !</div>
+          <button onClick={onClose} style={{ background: T.surfaceAlt, border: 'none', borderRadius: 10, padding: 7 }}><X size={16} color={T.text} /></button>
+        </div>
+        <div style={{ fontSize: 12.5, color: T.textMuted, marginBottom: 18 }}>
+          J'ai eu envie de l'acheter, vraiment. Mais finalement, je ne l'ai pas fait.
+        </div>
+
+        <label style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, fontWeight: 600, display: 'block' }}>Qu'est-ce que tu voulais acheter ?</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex. Nouvelles baskets"
+          style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 12, padding: '10px 14px', fontSize: 14, background: T.surface, color: T.text, marginBottom: 14 }} />
+
+        <label style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, fontWeight: 600, display: 'block' }}>Son prix</label>
+        <input autoFocus type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0"
+          style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 12, padding: '10px 14px', fontSize: 14, background: T.surface, color: T.text, marginBottom: 14 }} />
+
+        <label style={{ fontSize: 12, color: T.textMuted, marginBottom: 6, fontWeight: 600, display: 'block' }}>Qui a résisté ?</label>
+        <select value={payer} onChange={(e) => setPayer(e.target.value)} style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 12, padding: '9px 10px', fontSize: 13, background: T.surface, color: T.text, marginBottom: 20 }}>
+          {data.profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+          <option value={data.profiles.join(' & ')}>{data.profiles.join(' & ')}</option>
+        </select>
+
+        <button disabled={!canSave} onClick={() => onSave(name.trim(), parseFloat(price), payer)}
+          style={{ width: '100%', background: canSave ? T.accent : T.border, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 0', fontSize: 14, fontWeight: 600 }}>
+          Valider mon épargne 🏆
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function AddSheet({ T, data, myProfile, partner, preset, editingTx, initialDate, onClose, onSave, onDelete, onSaveRecurring }) {
   const [type, setType] = useState(editingTx?.type || preset || 'expense');
