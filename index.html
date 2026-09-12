@@ -107,7 +107,7 @@
 
 <!-- App (JSX transpiled in-browser by Babel standalone, loaded manually to avoid any conflict with the page's other scripts) -->
 <script>
-  fetch('app.js?v=8')
+  fetch('app.js?v=9')
     .then((r) => r.text())
     .then((code) => {
       const transformed = Babel.transform(code, { presets: [['react', { runtime: 'classic' }]] }).code;
