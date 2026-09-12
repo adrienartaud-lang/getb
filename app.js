@@ -70,6 +70,14 @@ const PRESET_EXPENSE_CATEGORIES = [
 ];
 const PRESET_COLOR_CYCLE = ['primary', 'secondary', 'accent', 'accent2'];
 
+const ICON_BANK = [
+  '🛒', '🏠', '🚗', '🍽️', '🎮', '❤️', '⚡', '🎁', '💵', '🔁',
+  '🐾', '👶', '📚', '✈️', '💊', '🏋️', '☕', '🍺', '🧹', '💅',
+  '📱', '🎬', '🎵', '🏥', '🚌', '🛠️', '📦', '💻', '👕', '🐶',
+  '🐱', '🌳', '🎨', '⚽', '🎓', '💳', '🏦', '🧴', '🛏️', '🚲',
+  '⛽', '🎂', '🍷', '🚿', '🧸', '🏖️', '🛡️', '💐', '🕯️', '•••',
+];
+
 const DEFAULT_EXPENSE_CATEGORIES = [
   { id: 'courses', name: 'Courses', icon: 'ShoppingCart', colorKey: 'primary' },
   { id: 'logement', name: 'Logement', icon: 'Home', colorKey: 'secondary' },
@@ -509,6 +517,12 @@ function App() {
       return { ...base, [key]: base[key].filter((c) => c.id !== id) };
     });
   };
+  const updateCategoryIcon = (id, icon, type) => {
+    persist((base) => {
+      const key = type === 'income' ? 'incomeCategories' : 'expenseCategories';
+      return { ...base, [key]: base[key].map((c) => (c.id === id ? { ...c, icon } : c)) };
+    });
+  };
 
   const addGoal = (goal) => persist((base) => ({ ...base, goals: [...base.goals, { id: genId(), current: 0, ...goal }] }));
   const contributeGoal = (id, amount) => persist((base) => ({
@@ -610,7 +624,7 @@ function App() {
           <SettingsView
             T={T} data={data} myProfile={myProfile} isDark={isDark} toggleTheme={toggleTheme}
             exportCSV={exportCSV} deleteRecurring={deleteRecurring} toggleRecurringActive={toggleRecurringActive}
-            addCategory={addCategory} deleteCategory={deleteCategory} switchProfile={logout}
+            addCategory={addCategory} deleteCategory={deleteCategory} updateCategoryIcon={updateCategoryIcon} switchProfile={logout}
             musicOn={musicOn} toggleMusic={toggleMusic}
           />
         )}
@@ -1406,10 +1420,11 @@ function GoalsView({ T, data, addGoal, contributeGoal, deleteGoal }) {
 
 /* ---------------------------------- settings ---------------------------------- */
 
-function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, deleteRecurring, toggleRecurringActive, addCategory, deleteCategory, switchProfile, musicOn, toggleMusic }) {
+function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, deleteRecurring, toggleRecurringActive, addCategory, deleteCategory, updateCategoryIcon, switchProfile, musicOn, toggleMusic }) {
   const [showNewCat, setShowNewCat] = useState(false);
   const [catName, setCatName] = useState('');
   const [catEmoji, setCatEmoji] = useState('');
+  const [pickerFor, setPickerFor] = useState(null); // null | 'new' | { id, type }
 
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
@@ -1430,12 +1445,16 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
         <div className="flex flex-col gap-2">
           {data.expenseCategories.map((c) => (
             <div key={c.id} className="flex items-center gap-2" style={{ fontSize: 13 }}>
-              <CategoryIcon name={c.icon} size={15} color={T[c.colorKey] || T.textMuted} />
-              <span style={{ flex: 1 }}>{c.name}</span>
+              <button onClick={() => setPickerFor({ id: c.id, type: 'expense' })}
+                className="flex items-center gap-2" style={{ flex: 1, background: 'none', border: 'none', textAlign: 'left', padding: '4px 0', color: T.text }}>
+                <CategoryIcon name={c.icon} size={16} color={T[c.colorKey] || T.textMuted} />
+                <span>{c.name}</span>
+              </button>
               <button onClick={() => deleteCategory(c.id, 'expense')} style={{ background: 'none', border: 'none', color: T.textMuted }}><Trash2 size={13} /></button>
             </div>
           ))}
         </div>
+        <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>Touche une catégorie pour changer son icône.</div>
 
         <div style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, margin: '12px 0 6px' }}>Ajouter rapidement (émoticônes)</div>
         <div className="flex flex-wrap gap-2" style={{ marginBottom: 10 }}>
@@ -1449,8 +1468,10 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
 
         {showNewCat ? (
           <div className="flex gap-2" style={{ marginTop: 10 }}>
-            <input value={catEmoji} onChange={(e) => setCatEmoji(e.target.value)} placeholder="🙂" maxLength={4}
-              style={{ width: 46, textAlign: 'center', border: `1px solid ${T.border}`, borderRadius: 10, padding: '7px 4px', fontSize: 16, background: T.bg, color: T.text }} />
+            <button onClick={() => setPickerFor('new')}
+              className="flex items-center justify-center" style={{ width: 40, height: 36, fontSize: 18, border: `1px solid ${T.border}`, borderRadius: 10, background: T.bg }}>
+              {catEmoji || '🙂'}
+            </button>
             <input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Nom de la catégorie" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 12, background: T.bg, color: T.text }} />
             <button onClick={() => { if (catName.trim()) { addCategory(catName.trim(), catEmoji.trim() || 'MoreHorizontal', 'accent', 'expense'); setCatName(''); setCatEmoji(''); setShowNewCat(false); } }}
               style={{ background: T.primary, color: '#fff', border: 'none', borderRadius: 10, padding: '0 12px', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
@@ -1480,6 +1501,21 @@ function SettingsView({ T, data, myProfile, isDark, toggleTheme, exportCSV, dele
       </Section>
 
       <div style={{ textAlign: 'center', color: T.textMuted, fontSize: 11, marginTop: 8 }}>Ad&Lie Budget · votre budget partagé</div>
+
+      {pickerFor && (
+        <IconPickerSheet
+          T={T}
+          onClose={() => setPickerFor(null)}
+          onSelect={(icon) => {
+            if (pickerFor === 'new') {
+              setCatEmoji(icon);
+            } else {
+              updateCategoryIcon(pickerFor.id, icon, pickerFor.type);
+            }
+            setPickerFor(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1501,6 +1537,27 @@ function RowButton({ T, icon: Icon, label, onClick, small }) {
 }
 
 /* ---------------------------------- add / edit sheet ---------------------------------- */
+
+function IconPickerSheet({ T, onClose, onSelect }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 55, maxWidth: 480, margin: '0 auto' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.bg, width: '100%', borderRadius: '24px 24px 0 0', padding: '18px 18px 26px', maxHeight: '70vh', overflowY: 'auto', animation: 'slideUp 0.25s ease-out' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+          <div className="fnum" style={{ fontSize: 16, fontWeight: 700 }}>Choisir une icône</div>
+          <button onClick={onClose} style={{ background: T.surfaceAlt, border: 'none', borderRadius: 10, padding: 7 }}><X size={16} color={T.text} /></button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {ICON_BANK.map((icon) => (
+            <button key={icon} onClick={() => onSelect(icon)}
+              className="flex items-center justify-center" style={{ width: 46, height: 46, fontSize: 22, background: T.surfaceAlt, border: 'none', borderRadius: 12 }}>
+              {icon}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AvoidedSheet({ T, data, myProfile, onClose, onSave }) {
   const [name, setName] = useState('');
