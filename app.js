@@ -78,6 +78,54 @@ const ICON_BANK = [
   '⛽', '🎂', '🍷', '🚿', '🧸', '🏖️', '🛡️', '💐', '🕯️', '•••',
 ];
 
+/* ---------------------------------- forecast: average provisioning rules ---------------------------------- */
+// Ce sont des règles moyennes / ordres de grandeur (pas un diagnostic personnalisé).
+
+const FUEL_PRICE_PER_L = { essence: 1.85, diesel: 1.75 };
+const FUEL_BASE_CONSO = { essence: 6.5, diesel: 5.5, hybride: 4.2, electrique: 0 }; // L/100km (ou kWh pour électrique)
+const USAGE_ADJUST = { ville: 1.15, mixte: 1, route: 0.85 };
+
+function estimateVehicleAnnualCost(v) {
+  const age = Math.max(0, new Date().getFullYear() - (parseInt(v.year, 10) || new Date().getFullYear()));
+  const kmYear = parseFloat(v.kmPerYear) || 0;
+  const conso = (FUEL_BASE_CONSO[v.fuel] ?? 6) * (USAGE_ADJUST[v.usage] || 1);
+  let fuelAnnual = 0;
+  if (v.fuel === 'electrique') {
+    fuelAnnual = (kmYear / 100) * 18 * 0.20; // ~18kWh/100km, ~0.20€/kWh
+  } else {
+    fuelAnnual = (kmYear / 100) * conso * (FUEL_PRICE_PER_L[v.fuel] || 1.8);
+  }
+  let wearRate = 0.03;
+  if (age >= 12) wearRate = 0.11;
+  else if (age >= 7) wearRate = 0.08;
+  else if (age >= 3) wearRate = 0.05;
+  const maintenanceAnnual = kmYear * wearRate;
+  const tireAnnual = (kmYear / 45000) * 500;
+  return { fuelAnnual, maintenanceAnnual, tireAnnual, total: fuelAnnual + maintenanceAnnual + tireAnnual };
+}
+
+const APPLIANCE_LIFESPAN = {
+  'Lave-linge': 9, 'Lave-vaisselle': 10, 'Réfrigérateur': 12, 'Congélateur': 13,
+  'Four': 12, 'Sèche-linge': 10, 'Chaudière / chauffe-eau': 15, 'Télévision': 8, 'Autre': 10,
+};
+
+function estimateApplianceAnnualCost(a) {
+  const lifespan = APPLIANCE_LIFESPAN[a.category] || 10;
+  const price = parseFloat(a.price) || 0;
+  return price / lifespan;
+}
+
+const WISHLIST_CATEGORIES = ['Maison', 'Vêtements', 'Transports', 'Loisirs', 'Quotidien', 'Anniversaires', 'Sorties', 'Voyages'];
+const WISHLIST_CATEGORY_ICONS = {
+  Maison: '🏠', Vêtements: '👕', Transports: '🚗', Loisirs: '🎮',
+  Quotidien: '🛒', Anniversaires: '🎂', Sorties: '🍺', Voyages: '✈️',
+};
+const IMPORTANCE_LEVELS = [
+  { id: 'faible', label: 'Faible', colorKey: 'textMuted' },
+  { id: 'moyenne', label: 'Moyenne', colorKey: 'accent2' },
+  { id: 'elevee', label: 'Élevée', colorKey: 'secondary' },
+];
+
 const DEFAULT_EXPENSE_CATEGORIES = [
   { id: 'courses', name: 'Courses', icon: 'ShoppingCart', colorKey: 'primary' },
   { id: 'logement', name: 'Logement', icon: 'Home', colorKey: 'secondary' },
@@ -207,6 +255,8 @@ function makeDefaultData(name1, name2) {
     recurring: [],
     goals: [],
     avoidedPurchases: [],
+    wishlist: [],
+    possessions: [],
     monthlyTargets: {},
     updatedAt: Date.now(),
     lastEditedBy: name1,
@@ -322,6 +372,29 @@ function App() {
   };
   const deleteAvoidedPurchase = (id) => persist((base) => ({
     ...base, avoidedPurchases: (base.avoidedPurchases || []).filter((a) => a.id !== id),
+  }));
+
+  const addPossession = (possession) => persist((base) => ({
+    ...base, possessions: [...(base.possessions || []), { id: genId(), createdAt: Date.now(), ...possession }],
+  }));
+  const deletePossession = (id) => persist((base) => ({
+    ...base, possessions: (base.possessions || []).filter((p) => p.id !== id),
+  }));
+
+  const addWishItem = (item) => persist((base) => ({
+    ...base, wishlist: [...(base.wishlist || []), { id: genId(), createdAt: Date.now(), ...item }],
+  }));
+  const deleteWishItem = (id) => persist((base) => ({
+    ...base, wishlist: (base.wishlist || []).filter((w) => w.id !== id),
+  }));
+  const toggleValidateWishItem = (id, profileName) => persist((base) => ({
+    ...base,
+    wishlist: (base.wishlist || []).map((w) => {
+      if (w.id !== id) return w;
+      const validatedBy = w.validatedBy || [];
+      const next = validatedBy.includes(profileName) ? validatedBy.filter((p) => p !== profileName) : [...validatedBy, profileName];
+      return { ...w, validatedBy: next };
+    }),
   }));
 
   const openAdd = (preset, initialDate) => {
@@ -615,10 +688,10 @@ function App() {
           />
         )}
         {tab === 'budgets' && (
-          <BudgetsView T={T} data={data} monthTx={monthTx} setCategoryBudget={setCategoryBudget} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} />
+          <BudgetsView T={T} data={data} monthTx={monthTx} setCategoryBudget={setCategoryBudget} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} addPossession={addPossession} deletePossession={deletePossession} />
         )}
         {tab === 'objectifs' && (
-          <GoalsView T={T} data={data} addGoal={addGoal} contributeGoal={contributeGoal} deleteGoal={deleteGoal} />
+          <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem} />
         )}
         {tab === 'reglages' && (
           <SettingsView
@@ -802,7 +875,7 @@ function BottomNav({ T, tab, setTab, onAdd }) {
     { id: 'accueil', label: 'Accueil', icon: Wallet },
     { id: 'historique', label: 'Historique', icon: ListFilter },
     { id: 'budgets', label: 'Budgets', icon: Euro },
-    { id: 'objectifs', label: 'Objectifs', icon: Target },
+    { id: 'objectifs', label: 'Achats', icon: ShoppingCart },
     { id: 'reglages', label: 'Réglages', icon: Settings2 },
   ];
   return (
@@ -1091,7 +1164,7 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
 
 /* ---------------------------------- budgets ---------------------------------- */
 
-function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, onAddForDate }) {
+function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, onAddForDate, addPossession, deletePossession }) {
   const [view, setView] = useState('calendar');
   const [editing, setEditing] = useState(null);
   const [value, setValue] = useState('');
@@ -1120,7 +1193,7 @@ function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, on
       <div className="fnum" style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>Budgets</div>
 
       <div className="flex gap-2">
-        {[{ id: 'calendar', label: 'Calendrier' }, { id: 'categories', label: 'Par catégorie' }].map((v) => (
+        {[{ id: 'calendar', label: 'Calendrier' }, { id: 'categories', label: 'Par catégorie' }, { id: 'forecast', label: 'Prévisionnel' }].map((v) => (
           <button key={v.id} onClick={() => setView(v.id)}
             style={{ flex: 1, padding: '9px 0', borderRadius: 12, border: 'none', fontSize: 12.5, fontWeight: 600,
               background: view === v.id ? T.primarySoft : T.surfaceAlt, color: view === v.id ? T.primary : T.textMuted }}>
@@ -1130,6 +1203,8 @@ function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, on
       </div>
 
       {view === 'calendar' && <MonthCalendar T={T} data={data} setMonthlyTarget={setMonthlyTarget} onAddForDate={onAddForDate} />}
+
+      {view === 'forecast' && <ForecastView T={T} data={data} addPossession={addPossession} deletePossession={deletePossession} />}
 
       {view === 'categories' && (
       <>
@@ -1187,6 +1262,149 @@ function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, on
 
 /* ---------------------------------- month calendar ---------------------------------- */
 
+function ForecastView({ T, data, addPossession, deletePossession }) {
+  const [addingType, setAddingType] = useState(null); // null | 'vehicule' | 'electromenager'
+
+  const possessions = data.possessions || [];
+  const totalAnnual = useMemo(() => possessions.reduce((s, p) => {
+    return s + (p.type === 'vehicule' ? estimateVehicleAnnualCost(p).total : estimateApplianceAnnualCost(p));
+  }, 0), [possessions]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div style={{ background: T.accentSoft, borderRadius: 16, padding: '14px 16px' }}>
+        <div style={{ fontSize: 12, color: T.accent, fontWeight: 600, marginBottom: 4 }}>Notre patrimoine — provisions moyennes</div>
+        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8 }}>
+          Estimations basées sur des règles moyennes (pas un diagnostic personnalisé) : usure, carburant, durée de vie moyenne.
+        </div>
+        {possessions.length > 0 ? (
+          <>
+            <div className="fnum" style={{ fontSize: 20, fontWeight: 700, color: T.accent }}>{fmtMoney(totalAnnual)} / an</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>soit environ {fmtMoney(totalAnnual / 12)} / mois à mettre de côté pour ces risques.</div>
+          </>
+        ) : (
+          <div style={{ fontSize: 12, color: T.textMuted }}>Ajoute un véhicule ou un appareil électroménager pour voir une estimation.</div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={() => setAddingType('vehicule')} className="flex-1 flex items-center justify-center gap-2" style={{ background: T.primarySoft, color: T.primary, borderRadius: 14, padding: '11px 0', fontWeight: 600, fontSize: 13, border: 'none' }}>
+          🚗 Ajouter un véhicule
+        </button>
+        <button onClick={() => setAddingType('electromenager')} className="flex-1 flex items-center justify-center gap-2" style={{ background: T.secondarySoft, color: T.secondary, borderRadius: 14, padding: '11px 0', fontWeight: 600, fontSize: 13, border: 'none' }}>
+          🧺 Ajouter un appareil
+        </button>
+      </div>
+
+      {addingType === 'vehicule' && <VehicleForm T={T} onCancel={() => setAddingType(null)} onSave={(v) => { addPossession({ type: 'vehicule', ...v }); setAddingType(null); }} />}
+      {addingType === 'electromenager' && <ApplianceForm T={T} onCancel={() => setAddingType(null)} onSave={(a) => { addPossession({ type: 'electromenager', ...a }); setAddingType(null); }} />}
+
+      <div className="flex flex-col gap-2">
+        {possessions.map((p) => {
+          const isVehicle = p.type === 'vehicule';
+          const cost = isVehicle ? estimateVehicleAnnualCost(p) : { total: estimateApplianceAnnualCost(p) };
+          return (
+            <div key={p.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '13px 14px' }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
+                  {isVehicle ? `🚗 ${p.brand} ${p.model} (${p.year})` : `🧺 ${p.category}`}
+                </div>
+                <button onClick={() => deletePossession(p.id)} style={{ background: 'none', border: 'none', color: T.textMuted }}><Trash2 size={14} /></button>
+              </div>
+              {isVehicle ? (
+                <div style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 6 }}>
+                  {p.fuel} · {p.mileage} km actuels · ~{p.kmPerYear} km/an · usage {p.usage}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 6 }}>
+                  Acheté en {p.purchaseYear} · {fmtMoney(parseFloat(p.price) || 0)} · durée de vie moyenne {APPLIANCE_LIFESPAN[p.category] || 10} ans
+                </div>
+              )}
+              <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: T.accent }}>≈ {fmtMoney(cost.total)} / an</div>
+              {isVehicle && (
+                <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>
+                  Carburant {fmtMoney(cost.fuelAnnual)} · Usure/entretien {fmtMoney(cost.maintenanceAnnual)} · Pneus {fmtMoney(cost.tireAnnual)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function VehicleForm({ T, onCancel, onSave }) {
+  const [brand, setBrand] = useState('');
+  const [model, setModel] = useState('');
+  const [year, setYear] = useState('');
+  const [fuel, setFuel] = useState('diesel');
+  const [mileage, setMileage] = useState('');
+  const [kmPerYear, setKmPerYear] = useState('');
+  const [usage, setUsage] = useState('mixte');
+
+  const canSave = brand.trim() && model.trim() && year && kmPerYear;
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Nouveau véhicule</div>
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Marque (ex. Renault)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Modèle (ex. Scénic III)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <input type="number" value={year} onChange={(e) => setYear(e.target.value)} placeholder="Année (ex. 2013)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <select value={fuel} onChange={(e) => setFuel(e.target.value)} style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }}>
+          <option value="diesel">Diesel</option>
+          <option value="essence">Essence</option>
+          <option value="hybride">Hybride</option>
+          <option value="electrique">Électrique</option>
+        </select>
+      </div>
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <input type="number" value={mileage} onChange={(e) => setMileage(e.target.value)} placeholder="Km actuels (ex. 150000)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <input type="number" value={kmPerYear} onChange={(e) => setKmPerYear(e.target.value)} placeholder="Km / an (ex. 18000)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <select value={usage} onChange={(e) => setUsage(e.target.value)} style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text, marginBottom: 12 }}>
+        <option value="ville">Surtout en ville</option>
+        <option value="mixte">Mixte (ville + route)</option>
+        <option value="route">Surtout route / autoroute</option>
+      </select>
+      <div className="flex gap-2">
+        <button onClick={onCancel} style={{ flex: 1, background: T.surfaceAlt, color: T.textMuted, border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Annuler</button>
+        <button disabled={!canSave} onClick={() => onSave({ brand: brand.trim(), model: model.trim(), year, fuel, mileage, kmPerYear, usage })}
+          style={{ flex: 1, background: canSave ? T.primary : T.border, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
+      </div>
+    </div>
+  );
+}
+
+function ApplianceForm({ T, onCancel, onSave }) {
+  const [category, setCategory] = useState('Lave-linge');
+  const [purchaseYear, setPurchaseYear] = useState('');
+  const [price, setPrice] = useState('');
+
+  const canSave = purchaseYear && price;
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Nouvel appareil</div>
+      <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text, marginBottom: 8 }}>
+        {Object.keys(APPLIANCE_LIFESPAN).map((k) => <option key={k} value={k}>{k}</option>)}
+      </select>
+      <div className="flex gap-2" style={{ marginBottom: 12 }}>
+        <input type="number" value={purchaseYear} onChange={(e) => setPurchaseYear(e.target.value)} placeholder="Année d'achat" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Prix d'achat (€)" style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onCancel} style={{ flex: 1, background: T.surfaceAlt, color: T.textMuted, border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Annuler</button>
+        <button disabled={!canSave} onClick={() => onSave({ category, purchaseYear, price })}
+          style={{ flex: 1, background: canSave ? T.secondary : T.border, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
+      </div>
+    </div>
+  );
+}
+
 function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); return d; });
   const [budgetInput, setBudgetInput] = useState('');
@@ -1233,9 +1451,16 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
     return s;
   }, [allNetByDay, lastKnownDay]);
 
-  const remainingDays = isCurrentMonth ? Math.max(0, daysInMonth - todayDay) : 0;
-  const remainingTarget = hasTarget ? effectiveBudget - cumulSoFar : null;
-  const perDayNeeded = remainingTarget !== null && remainingDays > 0 ? remainingTarget / remainingDays : remainingTarget;
+  const { mensuelleExpenseSoFar, ponctuelleExpenseSoFar } = useMemo(() => {
+    let me = 0, pe = 0;
+    data.transactions.forEach((t) => {
+      if (monthKey(t.date) !== mk || t.type !== 'expense') return;
+      const d = parseInt(t.date.slice(8, 10), 10);
+      if (d > lastKnownDay) return;
+      if (t.nature === 'mensuelle') me += t.amount; else pe += t.amount;
+    });
+    return { mensuelleExpenseSoFar: me, ponctuelleExpenseSoFar: pe };
+  }, [data.transactions, mk, lastKnownDay]);
 
   const weeks = [];
   let cells = Array(firstWeekday).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
@@ -1343,18 +1568,14 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
           <span style={{ color: T.textMuted }}>Épargne réelle depuis le début du mois</span>
           <span className="fnum" style={{ fontWeight: 700, color: cumulSoFar >= 0 ? T.primary : T.secondary }}>{fmtMoney(cumulSoFar)}</span>
         </div>
-        {hasTarget && isCurrentMonth && (
-          <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
-            {remainingTarget > 0
-              ? <>Objectif du mois : <b style={{ color: T.text }}>{fmtMoney(effectiveBudget)}</b> ({fmtMoney(effectiveDailyTarget)} / jour en rythme régulier). Il te reste <b style={{ color: T.text }}>{remainingDays}</b> jours pour économiser encore <b style={{ color: T.text }}>{fmtMoney(remainingTarget)}</b> — soit un rythme de rattrapage de <b style={{ color: T.text }}>{fmtMoney(perDayNeeded)}</b> / jour à partir de maintenant.</>
-              : <>Objectif du mois déjà atteint, bravo ! 🎉</>}
-          </div>
-        )}
-        {hasTarget && !isCurrentMonth && (
-          <div style={{ fontSize: 12, color: T.textMuted }}>
-            Objectif du mois : {fmtMoney(effectiveBudget)} — {cumulSoFar >= effectiveBudget ? 'atteint ✅' : `manqué de ${fmtMoney(effectiveBudget - cumulSoFar)}`}
-          </div>
-        )}
+        <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>
+          <span style={{ color: T.textMuted }}>Dépenses mensualisées ({isCurrentMonth ? `1 – ${lastKnownDay}` : 'tout le mois'})</span>
+          <span className="fnum" style={{ fontWeight: 600, color: T.secondary }}>{fmtMoney(mensuelleExpenseSoFar)}</span>
+        </div>
+        <div className="flex items-center justify-between" style={{ fontSize: 12 }}>
+          <span style={{ color: T.textMuted }}>Dépenses quotidiennes ({isCurrentMonth ? `1 – ${lastKnownDay}` : 'tout le mois'})</span>
+          <span className="fnum" style={{ fontWeight: 600, color: T.secondary }}>{fmtMoney(ponctuelleExpenseSoFar)}</span>
+        </div>
         <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 8 }}>Astuce : touche un jour pour y ajouter une transaction rétroactivement.</div>
       </div>
     </div>
@@ -1362,6 +1583,174 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
 }
 
 /* ---------------------------------- goals ---------------------------------- */
+
+function AchatsView({ T, data, myProfile, addWishItem, deleteWishItem, toggleValidateWishItem }) {
+  const [openCat, setOpenCat] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+
+  const wishlist = data.wishlist || [];
+
+  if (!openCat) {
+    return (
+      <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+        <div className="fnum" style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>Achats</div>
+        <div className="grid grid-cols-2 gap-3">
+          {WISHLIST_CATEGORIES.map((c) => {
+            const items = wishlist.filter((w) => w.category === c);
+            const total = items.reduce((s, w) => s + (parseFloat(w.price) || 0), 0);
+            return (
+              <button key={c} onClick={() => setOpenCat(c)}
+                className="flex flex-col items-center justify-center gap-1"
+                style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 20, padding: '22px 10px', textAlign: 'center' }}>
+                <span style={{ fontSize: 34 }}>{WISHLIST_CATEGORY_ICONS[c]}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: T.text, marginTop: 4 }}>{c}</span>
+                <span style={{ fontSize: 11, color: T.textMuted }}>
+                  {items.length > 0 ? `${items.length} · ${fmtMoney(total)}` : 'Aucune envie'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const itemsInCat = wishlist.filter((w) => w.category === openCat).sort((a, b) => (a.neededBy || '').localeCompare(b.neededBy || ''));
+  const catTotal = itemsInCat.reduce((s, w) => s + (parseFloat(w.price) || 0), 0);
+  const bothProfiles = data.profiles || [];
+
+  return (
+    <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+      <button onClick={() => { setOpenCat(null); setShowNew(false); }} className="flex items-center gap-1" style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, marginTop: 6 }}>
+        <ChevronLeft size={16} /> Toutes les catégories
+      </button>
+      <div className="flex items-center gap-2 fnum" style={{ fontSize: 19, fontWeight: 700 }}>
+        <span style={{ fontSize: 26 }}>{WISHLIST_CATEGORY_ICONS[openCat]}</span> {openCat}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div style={{ fontSize: 12.5, color: T.textMuted }}>{itemsInCat.length} envie{itemsInCat.length > 1 ? 's' : ''} · <span className="fnum" style={{ fontWeight: 700, color: T.text }}>{fmtMoney(catTotal)}</span></div>
+        <button onClick={() => setShowNew(!showNew)} className="flex items-center gap-1" style={{ background: T.primarySoft, color: T.primary, border: 'none', borderRadius: 12, padding: '7px 12px', fontSize: 12, fontWeight: 600 }}>
+          <Plus size={13} /> Ajouter
+        </button>
+      </div>
+
+      {showNew && (
+        <WishItemForm T={T} data={data} myProfile={myProfile} defaultCategory={openCat}
+          onCancel={() => setShowNew(false)} onSave={(item) => { addWishItem(item); setShowNew(false); }} />
+      )}
+
+      {itemsInCat.length === 0 && !showNew && (
+        <div className="flex flex-col items-center gap-2" style={{ padding: '30px 0', color: T.textMuted }}>
+          <span style={{ fontSize: 30 }}>🛍️</span>
+          <div style={{ fontSize: 13 }}>Aucune envie dans "{openCat}" pour l'instant.</div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {itemsInCat.map((w) => {
+          const imp = IMPORTANCE_LEVELS.find((i) => i.id === w.importance) || IMPORTANCE_LEVELS[0];
+          const validatedBy = w.validatedBy || [];
+          const isFullyValidated = bothProfiles.length > 0 && bothProfiles.every((p) => validatedBy.includes(p));
+          const iHaveValidated = myProfile && validatedBy.includes(myProfile);
+          return (
+            <div key={w.id} style={{
+              background: isFullyValidated ? T.primarySoft : T.surface,
+              border: `1px solid ${isFullyValidated ? T.primary : T.border}`, borderRadius: 16, padding: '13px 14px',
+            }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{w.name}</div>
+                <button onClick={() => deleteWishItem(w.id)} style={{ background: 'none', border: 'none', color: T.textMuted }}><Trash2 size={14} /></button>
+              </div>
+              <div className="flex items-center gap-2" style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 4, flexWrap: 'wrap' }}>
+                {w.place && <span>📍 {w.place}</span>}
+                {w.neededBy && <span>🗓️ {fmtDateShort(w.neededBy)}</span>}
+                <span className="fnum" style={{ background: T[imp.colorKey + 'Soft'] || T.surfaceAlt, color: T[imp.colorKey] || T.textMuted, borderRadius: 8, padding: '2px 8px', fontWeight: 600 }}>
+                  {imp.label}
+                </span>
+              </div>
+              {(w.from || w.forWhom) && (
+                <div style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 6 }}>
+                  {w.from && <>De la part de <b style={{ color: T.text }}>{w.from}</b></>}
+                  {w.from && w.forWhom && ' · '}
+                  {w.forWhom && <>Pour <b style={{ color: T.text }}>{w.forWhom}</b></>}
+                </div>
+              )}
+              <div className="flex items-center justify-between" style={{ marginTop: 6 }}>
+                <div className="fnum" style={{ fontSize: 16, fontWeight: 700, color: T.text }}>{fmtMoney(parseFloat(w.price) || 0)}</div>
+                <button onClick={() => myProfile && toggleValidateWishItem(w.id, myProfile)}
+                  className="flex items-center gap-1"
+                  style={{
+                    background: iHaveValidated ? T.primary : T.surfaceAlt, color: iHaveValidated ? '#fff' : T.textMuted,
+                    border: 'none', borderRadius: 10, padding: '7px 12px', fontSize: 11.5, fontWeight: 600,
+                  }}>
+                  <Check size={12} /> {isFullyValidated ? 'Validé par les deux ✅' : `Validé par ${validatedBy.length}/${bothProfiles.length || 2}`}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WishItemForm({ T, data, myProfile, defaultCategory, onCancel, onSave }) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [place, setPlace] = useState('');
+  const [category, setCategory] = useState(defaultCategory);
+  const [importance, setImportance] = useState('moyenne');
+  const [neededBy, setNeededBy] = useState('');
+  const [from, setFrom] = useState(myProfile || (data.profiles && data.profiles[0]) || '');
+  const [forWhom, setForWhom] = useState('');
+
+  const canSave = name.trim() && parseFloat(price) > 0;
+
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Nouvelle envie</div>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Quoi ? (ex. Canapé)"
+        style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text, marginBottom: 8 }} />
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Prix (€)"
+          style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Où ? (ex. Ikea)"
+          style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }}>
+          {WISHLIST_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <input type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} placeholder="Pour quand ?"
+          style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <div className="flex gap-2" style={{ marginBottom: 8 }}>
+        <select value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }}>
+          {(data.profiles || []).map((p) => <option key={p} value={p}>De {p}</option>)}
+        </select>
+        <input value={forWhom} onChange={(e) => setForWhom(e.target.value)} placeholder="Pour qui ? (ex. Léo)"
+          style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+      </div>
+      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>Niveau d'importance</div>
+      <div className="flex gap-2" style={{ marginBottom: 12 }}>
+        {IMPORTANCE_LEVELS.map((lvl) => (
+          <button key={lvl.id} onClick={() => setImportance(lvl.id)}
+            style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontSize: 12, fontWeight: 600,
+              background: importance === lvl.id ? (T[lvl.colorKey + 'Soft'] || T.surfaceAlt) : T.surfaceAlt,
+              color: importance === lvl.id ? (T[lvl.colorKey] || T.text) : T.textMuted }}>
+            {lvl.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={onCancel} style={{ flex: 1, background: T.surfaceAlt, color: T.textMuted, border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Annuler</button>
+        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), price: parseFloat(price), place: place.trim(), category, importance, neededBy, from, forWhom: forWhom.trim(), validatedBy: [] })}
+          style={{ flex: 1, background: canSave ? T.primary : T.border, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
+      </div>
+    </div>
+  );
+}
 
 function GoalsView({ T, data, addGoal, contributeGoal, deleteGoal }) {
   const [showNew, setShowNew] = useState(false);
