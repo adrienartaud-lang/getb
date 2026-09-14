@@ -120,6 +120,30 @@ const WISHLIST_CATEGORY_ICONS = {
   Maison: '🏠', Vêtements: '👕', Transports: '🚗', Loisirs: '🎮',
   Quotidien: '🛒', Anniversaires: '🎂', Sorties: '🍺', Voyages: '✈️',
 };
+
+function resizeImageFile(file, maxDim = 200, quality = 0.6) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height) { if (width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; } }
+        else { if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('image invalide'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('lecture impossible'));
+    reader.readAsDataURL(file);
+  });
+}
+
 const IMPORTANCE_LEVELS = [
   { id: 'faible', label: 'Faible', colorKey: 'textMuted' },
   { id: 'moyenne', label: 'Moyenne', colorKey: 'accent2' },
@@ -299,6 +323,7 @@ function App() {
   const [celebration, setCelebration] = useState(null);
   const [addInitialDate, setAddInitialDate] = useState(todayISO());
   const [showAvoided, setShowAvoided] = useState(false);
+  const [showQuickWish, setShowQuickWish] = useState(false);
 
   const dataRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -677,6 +702,7 @@ function App() {
             onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }}
             goToHistory={() => setTab('historique')}
             openAvoided={() => setShowAvoided(true)}
+            openWishlist={() => setShowQuickWish(true)}
             deleteAvoidedPurchase={deleteAvoidedPurchase}
           />
         )}
@@ -688,7 +714,7 @@ function App() {
           />
         )}
         {tab === 'budgets' && (
-          <BudgetsView T={T} data={data} monthTx={monthTx} setCategoryBudget={setCategoryBudget} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} addPossession={addPossession} deletePossession={deletePossession} />
+          <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} />
         )}
         {tab === 'objectifs' && (
           <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem} />
@@ -719,6 +745,14 @@ function App() {
           T={T} data={data} myProfile={myProfile}
           onClose={() => setShowAvoided(false)}
           onSave={addAvoidedPurchase}
+        />
+      )}
+
+      {showQuickWish && (
+        <QuickWishSheet
+          T={T} data={data} myProfile={myProfile}
+          onClose={() => setShowQuickWish(false)}
+          onSave={(item) => { addWishItem(item); setShowQuickWish(false); }}
         />
       )}
 
@@ -946,7 +980,7 @@ function DonutChart({ T, data }) {
   );
 }
 
-function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory, openAvoided, deleteAvoidedPurchase }) {
+function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory, openAvoided, deleteAvoidedPurchase, openWishlist }) {
   const pieData = useMemo(() => {
     const byCat = {};
     monthTx.filter((t) => t.type === 'expense').forEach((t) => {
@@ -989,6 +1023,10 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
 
       <button onClick={openAvoided} className="flex items-center justify-center gap-2" style={{ background: T.accentSoft, color: T.accent, borderRadius: 16, padding: '13px 0', fontWeight: 600, fontSize: 14, border: 'none' }}>
         🏆 J'ai résisté à un achat !
+      </button>
+
+      <button onClick={openWishlist} className="flex items-center justify-center gap-2" style={{ background: T.primarySoft, color: T.primary, borderRadius: 16, padding: '13px 0', fontWeight: 600, fontSize: 14, border: 'none' }}>
+        🛍️ Ajouter une envie d'achat
       </button>
 
       {monthAvoided.length > 0 && (
@@ -1164,98 +1202,11 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
 
 /* ---------------------------------- budgets ---------------------------------- */
 
-function BudgetsView({ T, data, monthTx, setCategoryBudget, setMonthlyTarget, onAddForDate, addPossession, deletePossession }) {
-  const [view, setView] = useState('calendar');
-  const [editing, setEditing] = useState(null);
-  const [value, setValue] = useState('');
-
-  const spendByCat = useMemo(() => {
-    const m = {};
-    monthTx.filter((t) => t.type === 'expense').forEach((t) => { m[t.categoryId] = (m[t.categoryId] || 0) + t.amount; });
-    return m;
-  }, [monthTx]);
-
-  const trendData = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
-      const mk = d.toISOString().slice(0, 7);
-      const label = MONTH_LABELS[d.getMonth()];
-      const inc = data.transactions.filter((t) => t.type === 'income' && monthKey(t.date) === mk).reduce((s, t) => s + t.amount, 0);
-      const exp = data.transactions.filter((t) => t.type === 'expense' && monthKey(t.date) === mk).reduce((s, t) => s + t.amount, 0);
-      months.push({ label, Revenus: Math.round(inc), Dépenses: Math.round(exp) });
-    }
-    return months;
-  }, [data.transactions]);
-
+function BudgetsView({ T, data, monthTx, setMonthlyTarget, onAddForDate }) {
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
       <div className="fnum" style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>Budgets</div>
-
-      <div className="flex gap-2">
-        {[{ id: 'calendar', label: 'Calendrier' }, { id: 'categories', label: 'Par catégorie' }, { id: 'forecast', label: 'Prévisionnel' }].map((v) => (
-          <button key={v.id} onClick={() => setView(v.id)}
-            style={{ flex: 1, padding: '9px 0', borderRadius: 12, border: 'none', fontSize: 12.5, fontWeight: 600,
-              background: view === v.id ? T.primarySoft : T.surfaceAlt, color: view === v.id ? T.primary : T.textMuted }}>
-            {v.label}
-          </button>
-        ))}
-      </div>
-
-      {view === 'calendar' && <MonthCalendar T={T} data={data} setMonthlyTarget={setMonthlyTarget} onAddForDate={onAddForDate} />}
-
-      {view === 'forecast' && <ForecastView T={T} data={data} addPossession={addPossession} deletePossession={deletePossession} />}
-
-      {view === 'categories' && (
-      <>
-      <div style={{ background: T.surface, borderRadius: 18, padding: '14px 10px 4px', border: `1px solid ${T.border}` }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, paddingLeft: 6 }}>Tendance sur 6 mois</div>
-        <TrendBars T={T} data={trendData} />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {data.expenseCategories.map((c) => {
-          const spent = spendByCat[c.id] || 0;
-          const budget = c.monthlyBudget || 0;
-          const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
-          const over = budget > 0 && spent > budget;
-          return (
-            <div key={c.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '13px 14px' }}>
-              <div className="flex items-center gap-3" style={{ marginBottom: budget > 0 ? 8 : 0 }}>
-                <div className="rounded-full flex items-center justify-center" style={{ width: 32, height: 32, background: T[c.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
-                  <CategoryIcon name={c.icon} size={16} color={T[c.colorKey] || T.textMuted} />
-                </div>
-                <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{c.name}</div>
-                {editing === c.id ? (
-                  <div className="flex items-center gap-1">
-                    <input autoFocus type="number" value={value} onChange={(e) => setValue(e.target.value)} placeholder="€/mois"
-                      style={{ width: 64, border: `1px solid ${T.border}`, borderRadius: 8, padding: '4px 6px', fontSize: 12, background: T.bg, color: T.text }} />
-                    <button onClick={() => { setCategoryBudget(c.id, parseFloat(value) || 0, 'expense'); setEditing(null); }} style={{ background: T.primary, border: 'none', borderRadius: 8, padding: 5 }}>
-                      <Check size={13} color="#fff" />
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => { setEditing(c.id); setValue(String(c.monthlyBudget || '')); }} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 11 }}>
-                    {budget > 0 ? <Pencil size={13} /> : 'Définir'}
-                  </button>
-                )}
-              </div>
-              {budget > 0 && (
-                <>
-                  <div style={{ height: 7, background: T.surfaceAlt, borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: over ? T.secondary : T.primary, borderRadius: 4, transition: 'width 0.3s' }} />
-                  </div>
-                  <div style={{ fontSize: 11, color: over ? T.secondary : T.textMuted, marginTop: 4 }}>
-                    {fmtMoney(spent)} / {fmtMoney(budget)} {over && '— dépassé'}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      </>
-      )}
+      <MonthCalendar T={T} data={data} setMonthlyTarget={setMonthlyTarget} onAddForDate={onAddForDate} />
     </div>
   );
 }
@@ -1576,6 +1527,24 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
           <span style={{ color: T.textMuted }}>Dépenses quotidiennes ({isCurrentMonth ? `1 – ${lastKnownDay}` : 'tout le mois'})</span>
           <span className="fnum" style={{ fontWeight: 600, color: T.secondary }}>{fmtMoney(ponctuelleExpenseSoFar)}</span>
         </div>
+
+        {(data.recurring || []).filter((r) => r.active !== false).length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, marginBottom: 5 }}>
+              Ces transactions "Mensuelles" se répéteront aussi les autres mois (pas seulement {MONTH_LABELS_FULL[month]}) :
+            </div>
+            {(data.recurring || []).filter((r) => r.active !== false).map((r) => (
+              <div key={r.id} className="flex items-center justify-between" style={{ fontSize: 11, color: T.textMuted, marginBottom: 2 }}>
+                <span>{r.label || 'Récurrence'} (le {r.dayOfMonth} de chaque mois)</span>
+                <span className="fnum" style={{ fontWeight: 600, color: r.type === 'income' ? T.primary : T.secondary }}>
+                  {r.type === 'income' ? '+' : '−'}{fmtMoney(r.amount)}
+                </span>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: T.textMuted, marginTop: 4 }}>À gérer dans Réglages → Transactions récurrentes (pause ou suppression).</div>
+          </div>
+        )}
+
         <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 8 }}>Astuce : touche un jour pour y ajouter une transaction rétroactivement.</div>
       </div>
     </div>
@@ -1659,8 +1628,11 @@ function AchatsView({ T, data, myProfile, addWishItem, deleteWishItem, toggleVal
               border: `1px solid ${isFullyValidated ? T.primary : T.border}`, borderRadius: 16, padding: '13px 14px',
             }}>
               <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{w.name}</div>
-                <button onClick={() => deleteWishItem(w.id)} style={{ background: 'none', border: 'none', color: T.textMuted }}><Trash2 size={14} /></button>
+                <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+                  {w.imageUrl && <img src={w.imageUrl} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />}
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{w.name}</div>
+                </div>
+                <button onClick={() => deleteWishItem(w.id)} style={{ background: 'none', border: 'none', color: T.textMuted, flexShrink: 0 }}><Trash2 size={14} /></button>
               </div>
               <div className="flex items-center gap-2" style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 4, flexWrap: 'wrap' }}>
                 {w.place && <span>📍 {w.place}</span>}
@@ -1669,6 +1641,11 @@ function AchatsView({ T, data, myProfile, addWishItem, deleteWishItem, toggleVal
                   {imp.label}
                 </span>
               </div>
+              {w.link && (
+                <a href={w.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: T.accent, textDecoration: 'underline', display: 'inline-block', marginBottom: 4 }}>
+                  Voir le produit ↗
+                </a>
+              )}
               {(w.from || w.forWhom) && (
                 <div style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 6 }}>
                   {w.from && <>De la part de <b style={{ color: T.text }}>{w.from}</b></>}
@@ -1704,6 +1681,20 @@ function WishItemForm({ T, data, myProfile, defaultCategory, onCancel, onSave })
   const [neededBy, setNeededBy] = useState('');
   const [from, setFrom] = useState(myProfile || (data.profiles && data.profiles[0]) || '');
   const [forWhom, setForWhom] = useState('');
+  const [link, setLink] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imgError, setImgError] = useState('');
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setImgError('');
+    try {
+      const dataUrl = await resizeImageFile(file, 200, 0.6);
+      if (dataUrl.length > 220000) { setImgError('Photo trop volumineuse, essaie une autre.'); return; }
+      setImageUrl(dataUrl);
+    } catch (err) { setImgError('Impossible de lire cette photo.'); }
+  };
 
   const canSave = name.trim() && parseFloat(price) > 0;
 
@@ -1732,6 +1723,20 @@ function WishItemForm({ T, data, myProfile, defaultCategory, onCancel, onSave })
         <input value={forWhom} onChange={(e) => setForWhom(e.target.value)} placeholder="Pour qui ? (ex. Léo)"
           style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
       </div>
+      <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Lien du produit (optionnel)"
+        style={{ width: '100%', border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text, marginBottom: 8 }} />
+
+      <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+        {imageUrl && <img src={imageUrl} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />}
+        <input value={imageUrl.startsWith('data:') ? '' : imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Ou collez un lien d'image"
+          style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12, background: T.bg, color: T.text }} />
+        <label style={{ background: T.surfaceAlt, color: T.text, borderRadius: 10, padding: '8px 10px', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+          📷 Photo
+          <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+        </label>
+      </div>
+      {imgError && <div style={{ fontSize: 10.5, color: T.secondary, marginBottom: 8 }}>{imgError}</div>}
+
       <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>Niveau d'importance</div>
       <div className="flex gap-2" style={{ marginBottom: 12 }}>
         {IMPORTANCE_LEVELS.map((lvl) => (
@@ -1745,7 +1750,7 @@ function WishItemForm({ T, data, myProfile, defaultCategory, onCancel, onSave })
       </div>
       <div className="flex gap-2">
         <button onClick={onCancel} style={{ flex: 1, background: T.surfaceAlt, color: T.textMuted, border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Annuler</button>
-        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), price: parseFloat(price), place: place.trim(), category, importance, neededBy, from, forWhom: forWhom.trim(), validatedBy: [] })}
+        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), price: parseFloat(price), place: place.trim(), category, importance, neededBy, from, forWhom: forWhom.trim(), link: link.trim(), imageUrl, validatedBy: [] })}
           style={{ flex: 1, background: canSave ? T.primary : T.border, color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12, fontWeight: 600 }}>Ajouter</button>
       </div>
     </div>
@@ -1958,6 +1963,20 @@ function IconPickerSheet({ T, onClose, onSelect }) {
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickWishSheet({ T, data, myProfile, onClose, onSave }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 50, maxWidth: 480, margin: '0 auto' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.bg, width: '100%', borderRadius: '24px 24px 0 0', padding: '18px 18px 26px', maxHeight: '88vh', overflowY: 'auto', animation: 'slideUp 0.25s ease-out' }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+          <div className="fnum" style={{ fontSize: 17, fontWeight: 700 }}>🛍️ Nouvelle envie d'achat</div>
+          <button onClick={onClose} style={{ background: T.surfaceAlt, border: 'none', borderRadius: 10, padding: 7 }}><X size={16} color={T.text} /></button>
+        </div>
+        <WishItemForm T={T} data={data} myProfile={myProfile} defaultCategory={WISHLIST_CATEGORIES[0]} onCancel={onClose} onSave={onSave} />
       </div>
     </div>
   );
