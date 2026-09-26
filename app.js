@@ -714,7 +714,7 @@ function App() {
           />
         )}
         {tab === 'budgets' && (
-          <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} />
+          <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }} />
         )}
         {tab === 'objectifs' && (
           <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem} />
@@ -1202,11 +1202,186 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
 
 /* ---------------------------------- budgets ---------------------------------- */
 
-function BudgetsView({ T, data, monthTx, setMonthlyTarget, onAddForDate }) {
+function BudgetsView({ T, data, monthTx, setMonthlyTarget, onAddForDate, onSelectTx }) {
+  const [showCategories, setShowCategories] = useState(false);
+
+  if (showCategories) {
+    return <CategoriesBreakdownView T={T} data={data} onBack={() => setShowCategories(false)} onSelectTx={onSelectTx} />;
+  }
+
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
-      <div className="fnum" style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>Budgets</div>
+      <div className="flex items-center justify-between" style={{ marginTop: 6 }}>
+        <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Budgets</div>
+        <button
+          onClick={() => setShowCategories(true)}
+          style={{
+            background: T.surfaceAlt, color: T.textMuted, border: `1px solid ${T.border}`,
+            borderRadius: 12, padding: '6px 11px', fontSize: 11.5, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}
+        >
+          📊 Catégories
+        </button>
+      </div>
       <MonthCalendar T={T} data={data} setMonthlyTarget={setMonthlyTarget} onAddForDate={onAddForDate} />
+    </div>
+  );
+}
+
+/* ---------------------------------- categories breakdown (by month) ---------------------------------- */
+
+function Pressable3DTile({ T, onClick, children, accentColor, style }) {
+  const [pressed, setPressed] = useState(false);
+  const base = accentColor || T.primary;
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={() => setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      style={{
+        background: T.surface,
+        border: `1px solid ${T.border}`,
+        borderBottom: pressed ? `2px solid ${T.border}` : `4px solid ${base}55`,
+        borderRadius: 16,
+        padding: '14px 10px',
+        textAlign: 'center',
+        transform: pressed ? 'translateY(2px)' : 'translateY(0)',
+        boxShadow: pressed ? 'none' : '0 3px 0 rgba(0,0,0,0.03), 0 6px 14px rgba(43,42,40,0.06)',
+        transition: 'transform 0.08s ease, border-bottom 0.08s ease, box-shadow 0.08s ease',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CategoriesBreakdownView({ T, data, onBack, onSelectTx }) {
+  const [openCategoryId, setOpenCategoryId] = useState(null);
+  const [openMonth, setOpenMonth] = useState(null);
+  const nowMk = monthKey(todayISO());
+
+  const categories = data.expenseCategories;
+
+  // Level 1: current-month total per category
+  const totalsThisMonth = useMemo(() => {
+    const map = {};
+    categories.forEach((c) => { map[c.id] = 0; });
+    data.transactions.forEach((t) => {
+      if (t.type === 'expense' && monthKey(t.date) === nowMk && map[t.categoryId] !== undefined) {
+        map[t.categoryId] += t.amount;
+      }
+    });
+    return map;
+  }, [data.transactions, categories, nowMk]);
+
+  const openCategory = categories.find((c) => c.id === openCategoryId) || null;
+
+  // Level 2: totals per month for the open category
+  const monthsForCategory = useMemo(() => {
+    if (!openCategoryId) return [];
+    const map = {};
+    data.transactions.forEach((t) => {
+      if (t.type === 'expense' && t.categoryId === openCategoryId) {
+        const mk = monthKey(t.date);
+        map[mk] = (map[mk] || 0) + t.amount;
+      }
+    });
+    return Object.entries(map)
+      .map(([mk, total]) => ({ mk, total }))
+      .sort((a, b) => (a.mk < b.mk ? 1 : -1));
+  }, [data.transactions, openCategoryId]);
+
+  // Level 3: transactions for the open category + open month
+  const txsForCategoryMonth = useMemo(() => {
+    if (!openCategoryId || !openMonth) return [];
+    return data.transactions
+      .filter((t) => t.type === 'expense' && t.categoryId === openCategoryId && monthKey(t.date) === openMonth)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [data.transactions, openCategoryId, openMonth]);
+
+  const fmtMonthLabel = (mk) => {
+    const [y, m] = mk.split('-').map(Number);
+    const label = new Date(y, m - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  };
+
+  // Level 3 view
+  if (openCategoryId && openMonth) {
+    const total = txsForCategoryMonth.reduce((s, t) => s + t.amount, 0);
+    return (
+      <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+        <button onClick={() => setOpenMonth(null)} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, textAlign: 'left', padding: 0 }}>← {fmtMonthLabel(openMonth)}</button>
+        <div className="flex items-center gap-2">
+          <div className="rounded-full flex items-center justify-center" style={{ width: 36, height: 36, background: T[openCategory?.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
+            <CategoryIcon name={openCategory?.icon} color={T[openCategory?.colorKey] || T.textMuted} />
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{openCategory?.name}</div>
+            <div style={{ fontSize: 11, color: T.textMuted }}>{fmtMonthLabel(openMonth)}</div>
+          </div>
+          <div className="fnum" style={{ marginLeft: 'auto', fontSize: 17, fontWeight: 700 }}>{fmtMoney(total)}</div>
+        </div>
+        <div className="flex flex-col gap-2">
+          {txsForCategoryMonth.length === 0 ? (
+            <div style={{ fontSize: 12, color: T.textMuted, textAlign: 'center', padding: '20px 0' }}>Aucune dépense.</div>
+          ) : (
+            txsForCategoryMonth.map((t) => (
+              <TxRow key={t.id} T={T} t={t} cat={openCategory} onClick={onSelectTx ? () => onSelectTx(t) : undefined} />
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Level 2 view
+  if (openCategoryId) {
+    return (
+      <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+        <button onClick={() => setOpenCategoryId(null)} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, textAlign: 'left', padding: 0 }}>← Catégories</button>
+        <div className="flex items-center gap-2">
+          <div className="rounded-full flex items-center justify-center" style={{ width: 36, height: 36, background: T[openCategory?.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
+            <CategoryIcon name={openCategory?.icon} color={T[openCategory?.colorKey] || T.textMuted} />
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{openCategory?.name}</div>
+        </div>
+        {monthsForCategory.length === 0 ? (
+          <div style={{ fontSize: 12, color: T.textMuted, textAlign: 'center', padding: '20px 0' }}>Aucune dépense enregistrée pour cette catégorie.</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {monthsForCategory.map(({ mk, total }) => (
+              <Pressable3DTile key={mk} T={T} accentColor={T[openCategory?.colorKey]} onClick={() => setOpenMonth(mk)}>
+                <div style={{ fontSize: 12, color: T.textMuted, fontWeight: 600 }}>{fmtMonthLabel(mk)}</div>
+                <div className="fnum" style={{ fontSize: 16, fontWeight: 700 }}>{fmtMoney(total)}</div>
+              </Pressable3DTile>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Level 1 view
+  return (
+    <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+      <button onClick={onBack} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, textAlign: 'left', padding: 0 }}>← Budgets</button>
+      <div className="fnum" style={{ fontSize: 20, fontWeight: 700 }}>Dépenses par catégorie</div>
+      <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: -6 }}>Ce mois-ci — remis à zéro chaque nouveau mois</div>
+      <div className="grid grid-cols-2 gap-3">
+        {categories.map((c) => (
+          <Pressable3DTile key={c.id} T={T} accentColor={T[c.colorKey]} onClick={() => setOpenCategoryId(c.id)}>
+            <div className="rounded-full flex items-center justify-center" style={{ width: 40, height: 40, background: T[c.colorKey + 'Soft'] || T.surfaceAlt }}>
+              <CategoryIcon name={c.icon} size={20} color={T[c.colorKey] || T.textMuted} />
+            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 2 }}>{c.name}</div>
+            <div className="fnum" style={{ fontSize: 15, fontWeight: 700, color: T[c.colorKey] || T.text }}>{fmtMoney(totalsThisMonth[c.id] || 0)}</div>
+          </Pressable3DTile>
+        ))}
+      </div>
     </div>
   );
 }
