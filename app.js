@@ -324,6 +324,7 @@ function App() {
   const [addInitialDate, setAddInitialDate] = useState(todayISO());
   const [showAvoided, setShowAvoided] = useState(false);
   const [showQuickWish, setShowQuickWish] = useState(false);
+  const [wishJumpCategory, setWishJumpCategory] = useState(null);
 
   const dataRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -703,6 +704,7 @@ function App() {
             goToHistory={() => setTab('historique')}
             openAvoided={() => setShowAvoided(true)}
             openWishlist={() => setShowQuickWish(true)}
+            onOpenWishItem={(item) => { setWishJumpCategory(item.category); setTab('objectifs'); }}
             deleteAvoidedPurchase={deleteAvoidedPurchase}
           />
         )}
@@ -717,7 +719,8 @@ function App() {
           <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }} />
         )}
         {tab === 'objectifs' && (
-          <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem} />
+          <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem}
+            initialCategory={wishJumpCategory} onConsumedInitialCategory={() => setWishJumpCategory(null)} />
         )}
         {tab === 'reglages' && (
           <SettingsView
@@ -980,7 +983,7 @@ function DonutChart({ T, data }) {
   );
 }
 
-function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory, openAvoided, deleteAvoidedPurchase, openWishlist }) {
+function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExpense, balanceOwed, monthTx, categoryOf, openAdd, onSelectTx, goToHistory, openAvoided, deleteAvoidedPurchase, openWishlist, onOpenWishItem }) {
   const pieData = useMemo(() => {
     const byCat = {};
     monthTx.filter((t) => t.type === 'expense').forEach((t) => {
@@ -997,8 +1000,49 @@ function Dashboard({ T, data, myProfile, partner, balance, monthIncome, monthExp
   const monthAvoided = useMemo(() => (data.avoidedPurchases || []).filter((a) => monthKey(a.date) === monthKey(todayISO())), [data.avoidedPurchases]);
   const monthAvoidedTotal = useMemo(() => monthAvoided.reduce((s, a) => s + a.price, 0), [monthAvoided]);
 
+  const bothProfiles = data.profiles || [];
+  const pendingWishlist = useMemo(() => {
+    return (data.wishlist || []).filter((w) => {
+      const validatedBy = w.validatedBy || [];
+      const isFullyValidated = bothProfiles.length > 0 && bothProfiles.every((p) => validatedBy.includes(p));
+      return !isFullyValidated;
+    });
+  }, [data.wishlist, bothProfiles]);
+
   return (
     <div className="flex flex-col gap-4" style={{ animation: 'fadeIn 0.3s' }}>
+      {pendingWishlist.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>🛍️ Envies d'achat</div>
+          <div className="flex gap-3" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4, marginRight: -16, paddingRight: 16 }}>
+            {pendingWishlist.map((w) => (
+              <button
+                key={w.id}
+                onClick={() => onOpenWishItem && onOpenWishItem(w)}
+                style={{
+                  flexShrink: 0, width: 84, background: 'none', border: 'none', padding: 0,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                }}
+              >
+                <div style={{
+                  width: 72, height: 72, borderRadius: 18, overflow: 'hidden',
+                  background: T.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `1px solid ${T.border}`,
+                }}>
+                  {w.imageUrl ? (
+                    <img src={w.imageUrl} alt={w.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <span style={{ fontSize: 28 }}>{WISHLIST_CATEGORY_ICONS[w.category] || '🛍️'}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.text, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%' }}>{w.name}</div>
+                {w.price ? <div className="fnum" style={{ fontSize: 10.5, color: T.textMuted }}>{fmtMoney(parseFloat(w.price) || 0)}</div> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ background: `linear-gradient(135deg, ${T.primary}, ${T.accent})`, borderRadius: 22, padding: 22, color: '#fff', boxShadow: T.shadow }}>
         <div style={{ fontSize: 13, opacity: 0.85 }}>Solde commun</div>
         <div className="fnum" style={{ fontSize: 34, fontWeight: 700, margin: '4px 0 14px' }}>{fmtMoney(balance)}</div>
@@ -1728,9 +1772,14 @@ function MonthCalendar({ T, data, setMonthlyTarget, onAddForDate }) {
 
 /* ---------------------------------- goals ---------------------------------- */
 
-function AchatsView({ T, data, myProfile, addWishItem, deleteWishItem, toggleValidateWishItem }) {
-  const [openCat, setOpenCat] = useState(null);
+function AchatsView({ T, data, myProfile, addWishItem, deleteWishItem, toggleValidateWishItem, initialCategory, onConsumedInitialCategory }) {
+  const [openCat, setOpenCat] = useState(initialCategory || null);
   const [showNew, setShowNew] = useState(false);
+
+  useEffect(() => {
+    if (initialCategory && onConsumedInitialCategory) onConsumedInitialCategory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const wishlist = data.wishlist || [];
 
