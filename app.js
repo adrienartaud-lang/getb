@@ -423,6 +423,25 @@ function App() {
     }),
   }));
 
+  const addSubgroup = (categoryId, month, name, transactionIds) => persist((base) => ({
+    ...base,
+    subgroups: [...(base.subgroups || []), { id: genId(), categoryId, month, name, transactionIds: transactionIds || [], createdAt: Date.now() }],
+  }));
+  const renameSubgroup = (id, name) => persist((base) => ({
+    ...base, subgroups: (base.subgroups || []).map((g) => (g.id === id ? { ...g, name } : g)),
+  }));
+  const deleteSubgroup = (id) => persist((base) => ({
+    ...base, subgroups: (base.subgroups || []).filter((g) => g.id !== id),
+  }));
+  const addTxToSubgroup = (subgroupId, txId) => persist((base) => ({
+    ...base,
+    subgroups: (base.subgroups || []).map((g) => (g.id === subgroupId && !g.transactionIds.includes(txId) ? { ...g, transactionIds: [...g.transactionIds, txId] } : g)),
+  }));
+  const removeTxFromSubgroup = (subgroupId, txId) => persist((base) => ({
+    ...base,
+    subgroups: (base.subgroups || []).map((g) => (g.id === subgroupId ? { ...g, transactionIds: g.transactionIds.filter((i) => i !== txId) } : g)),
+  }));
+
   const openAdd = (preset, initialDate) => {
     setAddPreset(preset || 'expense');
     setAddInitialDate(initialDate || todayISO());
@@ -716,7 +735,9 @@ function App() {
           />
         )}
         {tab === 'budgets' && (
-          <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }} />
+          <BudgetsView T={T} data={data} monthTx={monthTx} setMonthlyTarget={setMonthlyTarget} onAddForDate={(d) => openAdd('expense', d)} onSelectTx={(t) => { setEditingTx(t); setShowAdd(true); }}
+            addSubgroup={addSubgroup} renameSubgroup={renameSubgroup} deleteSubgroup={deleteSubgroup}
+            addTxToSubgroup={addTxToSubgroup} removeTxFromSubgroup={removeTxFromSubgroup} />
         )}
         {tab === 'objectifs' && (
           <AchatsView T={T} data={data} myProfile={myProfile} addWishItem={addWishItem} deleteWishItem={deleteWishItem} toggleValidateWishItem={toggleValidateWishItem}
@@ -1246,11 +1267,17 @@ function HistoryView({ T, data, categoryOf, onSelectTx, onAddForMonth }) {
 
 /* ---------------------------------- budgets ---------------------------------- */
 
-function BudgetsView({ T, data, monthTx, setMonthlyTarget, onAddForDate, onSelectTx }) {
+function BudgetsView({ T, data, monthTx, setMonthlyTarget, onAddForDate, onSelectTx, addSubgroup, renameSubgroup, deleteSubgroup, addTxToSubgroup, removeTxFromSubgroup }) {
   const [showCategories, setShowCategories] = useState(false);
 
   if (showCategories) {
-    return <CategoriesBreakdownView T={T} data={data} onBack={() => setShowCategories(false)} onSelectTx={onSelectTx} />;
+    return (
+      <CategoriesBreakdownView
+        T={T} data={data} onBack={() => setShowCategories(false)} onSelectTx={onSelectTx}
+        addSubgroup={addSubgroup} renameSubgroup={renameSubgroup} deleteSubgroup={deleteSubgroup}
+        addTxToSubgroup={addTxToSubgroup} removeTxFromSubgroup={removeTxFromSubgroup}
+      />
+    );
   }
 
   return (
@@ -1303,7 +1330,183 @@ function Pressable3DTile({ T, onClick, children, accentColor, style }) {
   );
 }
 
-function CategoriesBreakdownView({ T, data, onBack, onSelectTx }) {
+function SelectableTxRow({ T, t, cat, selected, onToggle }) {
+  return (
+    <div
+      onClick={onToggle}
+      className="flex items-center gap-3"
+      style={{
+        background: selected ? T.primarySoft : T.surface,
+        border: `1px solid ${selected ? T.primary : T.border}`,
+        borderRadius: 16, padding: '11px 14px', cursor: 'pointer',
+      }}
+    >
+      <div style={{
+        width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+        border: `2px solid ${selected ? T.primary : T.border}`, background: selected ? T.primary : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {selected && <Check size={12} color="#fff" />}
+      </div>
+      <div className="rounded-full flex items-center justify-center" style={{ width: 34, height: 34, background: T[cat?.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
+        <CategoryIcon name={cat?.icon} size={16} color={T[cat?.colorKey] || T.textMuted} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.note || cat?.name || 'Transaction'}</div>
+        <div style={{ fontSize: 11, color: T.textMuted }}>{cat?.name} · {t.payer} · {fmtDateShort(t.date)}</div>
+      </div>
+      <div className="fnum" style={{ fontWeight: 700, fontSize: 14, color: T.text, flexShrink: 0 }}>
+        −{fmtMoney(t.amount).replace('-', '')}
+      </div>
+    </div>
+  );
+}
+
+function CategoryMonthDetailView({ T, data, category, month, onBack, onSelectTx, addSubgroup, renameSubgroup, deleteSubgroup, addTxToSubgroup, removeTxFromSubgroup, fmtMonthLabel }) {
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [showNewGroupForm, setShowNewGroupForm] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [expandedGroupId, setExpandedGroupId] = useState(null);
+
+  const txs = useMemo(() => data.transactions
+    .filter((t) => t.type === 'expense' && t.categoryId === category.id && monthKey(t.date) === month)
+    .sort((a, b) => (a.date < b.date ? 1 : -1)), [data.transactions, category.id, month]);
+
+  const txById = useMemo(() => { const m = {}; txs.forEach((t) => { m[t.id] = t; }); return m; }, [txs]);
+
+  const subgroups = useMemo(() => (data.subgroups || []).filter((g) => g.categoryId === category.id && g.month === month), [data.subgroups, category.id, month]);
+
+  const total = txs.reduce((s, t) => s + t.amount, 0);
+
+  const toggleSelect = (id) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const resetSelection = () => { setSelectMode(false); setSelectedIds([]); setShowNewGroupForm(false); setNewGroupName(''); };
+
+  const createGroup = () => {
+    if (!newGroupName.trim() || selectedIds.length === 0) return;
+    addSubgroup(category.id, month, newGroupName.trim(), selectedIds);
+    resetSelection();
+  };
+
+  const addSelectionToGroup = (groupId) => {
+    selectedIds.forEach((id) => addTxToSubgroup(groupId, id));
+    resetSelection();
+  };
+
+  return (
+    <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
+      <button onClick={onBack} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, textAlign: 'left', padding: 0 }}>← {fmtMonthLabel(month)}</button>
+      <div className="flex items-center gap-2">
+        <div className="rounded-full flex items-center justify-center" style={{ width: 36, height: 36, background: T[category?.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
+          <CategoryIcon name={category?.icon} color={T[category?.colorKey] || T.textMuted} />
+        </div>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{category?.name}</div>
+          <div style={{ fontSize: 11, color: T.textMuted }}>{fmtMonthLabel(month)}</div>
+        </div>
+        <div className="fnum" style={{ marginLeft: 'auto', fontSize: 17, fontWeight: 700 }}>{fmtMoney(total)}</div>
+      </div>
+
+      {subgroups.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {subgroups.map((g) => {
+            const memberTxs = g.transactionIds.map((id) => txById[id]).filter(Boolean);
+            const groupTotal = memberTxs.reduce((s, t) => s + t.amount, 0);
+            const isExpanded = expandedGroupId === g.id;
+            return (
+              <div key={g.id} style={{ background: T.accentSoft, border: `1px solid ${T.accent}55`, borderRadius: 16, padding: '12px 14px' }}>
+                <button onClick={() => setExpandedGroupId(isExpanded ? null : g.id)} className="flex items-center justify-between" style={{ background: 'none', border: 'none', padding: 0, width: '100%', textAlign: 'left' }}>
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: T.accent, fontSize: 11 }}>{isExpanded ? '▾' : '▸'}</span>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: T.accent }}>📁 {g.name}</span>
+                    <span style={{ fontSize: 11, color: T.textMuted }}>({memberTxs.length})</span>
+                  </div>
+                  <span className="fnum" style={{ fontWeight: 700, fontSize: 14 }}>{fmtMoney(groupTotal)}</span>
+                </button>
+                {isExpanded && (
+                  <div className="flex flex-col gap-2" style={{ marginTop: 10 }}>
+                    {memberTxs.length === 0 ? (
+                      <div style={{ fontSize: 11.5, color: T.textMuted }}>Aucune dépense dans ce sous-groupe.</div>
+                    ) : memberTxs.map((t) => (
+                      <div key={t.id} className="flex items-center gap-2">
+                        <div style={{ flex: 1 }}><TxRow T={T} t={t} cat={category} onClick={onSelectTx ? () => onSelectTx(t) : undefined} /></div>
+                        <button onClick={() => removeTxFromSubgroup(g.id, t.id)} title="Retirer du sous-groupe" style={{ background: 'none', border: 'none', color: T.textMuted, flexShrink: 0 }}><X size={13} /></button>
+                      </div>
+                    ))}
+                    <button onClick={() => deleteSubgroup(g.id)} style={{ fontSize: 11, color: T.secondary, background: 'none', border: 'none', textAlign: 'left', padding: 0, marginTop: 2 }}>
+                      Supprimer ce sous-groupe
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.textMuted }}>Dépenses</div>
+        <button
+          onClick={() => (selectMode ? resetSelection() : setSelectMode(true))}
+          style={{ background: selectMode ? T.secondarySoft : T.surfaceAlt, color: selectMode ? T.secondary : T.textMuted, border: `1px solid ${T.border}`, borderRadius: 12, padding: '5px 10px', fontSize: 11.5, fontWeight: 600 }}
+        >
+          {selectMode ? 'Annuler' : 'Sélectionner'}
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {txs.length === 0 ? (
+          <div style={{ fontSize: 12, color: T.textMuted, textAlign: 'center', padding: '20px 0' }}>Aucune dépense.</div>
+        ) : (
+          txs.map((t) => (
+            selectMode ? (
+              <SelectableTxRow key={t.id} T={T} t={t} cat={category} selected={selectedIds.includes(t.id)} onToggle={() => toggleSelect(t.id)} />
+            ) : (
+              <TxRow key={t.id} T={T} t={t} cat={category} onClick={onSelectTx ? () => onSelectTx(t) : undefined} />
+            )
+          ))
+        )}
+      </div>
+
+      {selectMode && selectedIds.length > 0 && (
+        <div style={{ position: 'sticky', bottom: 8, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: 12, boxShadow: T.shadow }}>
+          <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8 }}>{selectedIds.length} sélectionnée{selectedIds.length > 1 ? 's' : ''}</div>
+          {!showNewGroupForm ? (
+            <div className="flex flex-col gap-2">
+              {subgroups.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {subgroups.map((g) => (
+                    <button key={g.id} onClick={() => addSelectionToGroup(g.id)} style={{ fontSize: 11.5, fontWeight: 600, background: T.accentSoft, color: T.accent, border: 'none', borderRadius: 10, padding: '6px 10px' }}>
+                      + {g.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => setShowNewGroupForm(true)} style={{ background: T.primarySoft, color: T.primary, border: 'none', borderRadius: 10, padding: '9px 0', fontSize: 12.5, fontWeight: 700 }}>
+                Créer un nouveau sous-groupe
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input
+                autoFocus value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="Nom du sous-groupe (ex. Leclerc)"
+                style={{ flex: 1, border: `1px solid ${T.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 12.5, background: T.bg, color: T.text }}
+              />
+              <button disabled={!newGroupName.trim()} onClick={createGroup}
+                style={{ background: newGroupName.trim() ? T.primary : T.border, color: '#fff', border: 'none', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, fontWeight: 700 }}>
+                Créer
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoriesBreakdownView({ T, data, onBack, onSelectTx, addSubgroup, renameSubgroup, deleteSubgroup, addTxToSubgroup, removeTxFromSubgroup }) {
   const [openCategoryId, setOpenCategoryId] = useState(null);
   const [openMonth, setOpenMonth] = useState(null);
   const nowMk = monthKey(todayISO());
@@ -1339,14 +1542,6 @@ function CategoriesBreakdownView({ T, data, onBack, onSelectTx }) {
       .sort((a, b) => (a.mk < b.mk ? 1 : -1));
   }, [data.transactions, openCategoryId]);
 
-  // Level 3: transactions for the open category + open month
-  const txsForCategoryMonth = useMemo(() => {
-    if (!openCategoryId || !openMonth) return [];
-    return data.transactions
-      .filter((t) => t.type === 'expense' && t.categoryId === openCategoryId && monthKey(t.date) === openMonth)
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [data.transactions, openCategoryId, openMonth]);
-
   const fmtMonthLabel = (mk) => {
     const [y, m] = mk.split('-').map(Number);
     const label = new Date(y, m - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -1355,30 +1550,13 @@ function CategoriesBreakdownView({ T, data, onBack, onSelectTx }) {
 
   // Level 3 view
   if (openCategoryId && openMonth) {
-    const total = txsForCategoryMonth.reduce((s, t) => s + t.amount, 0);
     return (
-      <div className="flex flex-col gap-3" style={{ animation: 'fadeIn 0.3s' }}>
-        <button onClick={() => setOpenMonth(null)} style={{ background: 'none', border: 'none', color: T.textMuted, fontSize: 13, textAlign: 'left', padding: 0 }}>← {fmtMonthLabel(openMonth)}</button>
-        <div className="flex items-center gap-2">
-          <div className="rounded-full flex items-center justify-center" style={{ width: 36, height: 36, background: T[openCategory?.colorKey + 'Soft'] || T.surfaceAlt, flexShrink: 0 }}>
-            <CategoryIcon name={openCategory?.icon} color={T[openCategory?.colorKey] || T.textMuted} />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>{openCategory?.name}</div>
-            <div style={{ fontSize: 11, color: T.textMuted }}>{fmtMonthLabel(openMonth)}</div>
-          </div>
-          <div className="fnum" style={{ marginLeft: 'auto', fontSize: 17, fontWeight: 700 }}>{fmtMoney(total)}</div>
-        </div>
-        <div className="flex flex-col gap-2">
-          {txsForCategoryMonth.length === 0 ? (
-            <div style={{ fontSize: 12, color: T.textMuted, textAlign: 'center', padding: '20px 0' }}>Aucune dépense.</div>
-          ) : (
-            txsForCategoryMonth.map((t) => (
-              <TxRow key={t.id} T={T} t={t} cat={openCategory} onClick={onSelectTx ? () => onSelectTx(t) : undefined} />
-            ))
-          )}
-        </div>
-      </div>
+      <CategoryMonthDetailView
+        T={T} data={data} category={openCategory} month={openMonth}
+        onBack={() => setOpenMonth(null)} onSelectTx={onSelectTx} fmtMonthLabel={fmtMonthLabel}
+        addSubgroup={addSubgroup} renameSubgroup={renameSubgroup} deleteSubgroup={deleteSubgroup}
+        addTxToSubgroup={addTxToSubgroup} removeTxFromSubgroup={removeTxFromSubgroup}
+      />
     );
   }
 
